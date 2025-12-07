@@ -2,22 +2,22 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 /// Check if a pointer is aligned to the given alignment
-pub fn isAligned(ptr: anytype, alignment: usize) bool {
+pub fn isAligned(ptr: anytype, alignment: std.mem.Alignment) bool {
     const addr = switch (@typeInfo(@TypeOf(ptr))) {
         .pointer => @intFromPtr(ptr),
         .int, .comptime_int => ptr,
         else => @compileError("Expected pointer or integer"),
     };
-    return addr % alignment == 0;
+    return addr % alignment.toByteUnits() == 0;
 }
 
 /// Calculate the aligned size for a given size and alignment
-pub fn alignedSize(size: usize, alignment: usize) usize {
-    return std.mem.alignForward(usize, size, alignment);
+pub fn alignedSize(size: usize, alignment: std.mem.Alignment) usize {
+    return alignment.forward(size);
 }
 
 /// Calculate padding needed to align a size
-pub fn alignmentPadding(size: usize, alignment: usize) usize {
+pub fn alignmentPadding(size: usize, alignment: std.mem.Alignment) usize {
     return alignedSize(size, alignment) - size;
 }
 
@@ -86,12 +86,12 @@ pub const MemoryRegion = struct {
     }
 
     /// Check if the region start is aligned to a given alignment
-    pub fn isStartAligned(self: MemoryRegion, alignment: usize) bool {
+    pub fn isStartAligned(self: MemoryRegion, alignment: std.mem.Alignment) bool {
         return isAligned(self.start, alignment);
     }
 
     /// Check if both start and length are aligned
-    pub fn isFullyAligned(self: MemoryRegion, alignment: usize) bool {
+    pub fn isFullyAligned(self: MemoryRegion, alignment: std.mem.Alignment) bool {
         return isAligned(self.start, alignment) and isAligned(self.len, alignment);
     }
 
@@ -140,15 +140,19 @@ pub const MemoryRegion = struct {
     }
 
     /// Align the region start up to the given alignment (shrinks region)
-    pub fn alignStartUp(self: MemoryRegion, alignment: usize) MemoryRegion {
-        const aligned_start = std.mem.alignForward(usize, self.start, alignment);
+    ///
+    /// Moves the start address up to the next aligned address.
+    pub fn alignStartUp(self: MemoryRegion, alignment: std.mem.Alignment) MemoryRegion {
+        const aligned_start = alignment.forward(self.start);
         if (aligned_start >= self.end()) return empty;
         return .{ .start = aligned_start, .len = self.end() - aligned_start };
     }
 
     /// Align the region end down to the given alignment (shrinks region)
-    pub fn alignEndDown(self: MemoryRegion, alignment: usize) MemoryRegion {
-        const aligned_end = std.mem.alignBackward(usize, self.end(), alignment);
+    ///
+    /// Moves the end address down to the previous aligned address.
+    pub fn alignEndDown(self: MemoryRegion, alignment: std.mem.Alignment) MemoryRegion {
+        const aligned_end = alignment.backward(self.end());
         if (aligned_end <= self.start) return empty;
         return .{ .start = self.start, .len = aligned_end - self.start };
     }
@@ -183,42 +187,10 @@ pub const MemoryRegion = struct {
         return .{ .start = start_addr, .len = end_addr - start_addr };
     }
 
-    /// Get the module name containing this memory region's start address.
-    /// Only works in debug/safe builds. Caller owns returned memory.
-    pub fn getModuleName(self: MemoryRegion, allocator: std.mem.Allocator) ![]const u8 {
-        if (self.isEmpty()) {
-            return try allocator.dupe(u8, "(empty region)");
-        }
-
-        const debug_info = std.debug.getSelfDebugInfo() catch {
-            return try allocator.dupe(u8, "(debug info unavailable)");
-        };
-
-        const module = debug_info.getModuleForAddress(self.start) catch {
-            return try allocator.dupe(u8, "(no module)");
-        };
-
-        const symbol = try module.getSymbolAtAddress(allocator, module.base_address);
-        return try allocator.dupe(u8, symbol.name);
-    }
-
-    /// Get symbol information for the start address of this region.
-    /// Only works in debug/safe builds. Caller owns returned memory.
-    pub fn getSymbolInfo(self: MemoryRegion, allocator: std.mem.Allocator) ![]const u8 {
-        if (self.isEmpty()) {
-            return try allocator.dupe(u8, "(empty region)");
-        }
-        return resolveSourceLocation(allocator, self.start);
-    }
-
     /// Format the region as a human-readable string.
     /// Caller owns returned memory.
     pub fn formatRegion(self: MemoryRegion, allocator: std.mem.Allocator) ![]const u8 {
-        return std.fmt.allocPrint(allocator, "0x{x}..0x{x} ({f})", .{
-            self.start,
-            self.end(),
-            byteSize(self.len),
-        });
+        return std.fmt.allocPrint(allocator, "{f}", .{self});
     }
 
     /// Std formatter support
@@ -226,7 +198,11 @@ pub const MemoryRegion = struct {
         self: MemoryRegion,
         writer: *std.io.Writer,
     ) !void {
-        try writer.print("0x{x}..0x{x} ({f})", .{ self.start, self.end(), byteSize(self.len) });
+        try writer.print("0x{x}..0x{x} ({f})", .{
+            self.start,
+            self.end(),
+            byteSize(self.len),
+        });
     }
 };
 
@@ -234,7 +210,7 @@ pub const MemoryRegion = struct {
 pub fn ScopeMarker(comptime AllocatorType: type) type {
     switch (AllocatorType) {
         @import("stack_allocator.zig").StackAllocator => {},
-        else => @compileError("ScopeMarker only supports StackAllocator type"),
+        else => @compileError("ScopeMarker only supports StackAllocator type currently"),
     }
     return struct {
         allocator: *AllocatorType,
@@ -281,19 +257,7 @@ pub const ByteSize = struct {
 
     /// Format to an allocated string. Caller owns returned memory.
     pub fn formatAlloc(self: ByteSize, allocator: std.mem.Allocator) error{OutOfMemory}![]const u8 {
-        if (self.bytes >= PB) {
-            return std.fmt.allocPrint(allocator, "{d:.2} PiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, PB)});
-        } else if (self.bytes >= TB) {
-            return std.fmt.allocPrint(allocator, "{d:.2} TiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, TB)});
-        } else if (self.bytes >= GB) {
-            return std.fmt.allocPrint(allocator, "{d:.2} GiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, GB)});
-        } else if (self.bytes >= MB) {
-            return std.fmt.allocPrint(allocator, "{d:.2} MiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, MB)});
-        } else if (self.bytes >= KB) {
-            return std.fmt.allocPrint(allocator, "{d:.2} KiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, KB)});
-        } else {
-            return std.fmt.allocPrint(allocator, "{d} B", .{self.bytes});
-        }
+        return std.fmt.allocPrint(allocator, "{f}", .{self});
     }
 };
 
@@ -339,24 +303,28 @@ pub fn resolveSourceLocation(allocator: std.mem.Allocator, address: usize) ![]co
 // ============================================================================
 
 test "isAligned" {
-    try std.testing.expect(isAligned(@as(usize, 0), 4));
-    try std.testing.expect(isAligned(@as(usize, 4), 4));
-    try std.testing.expect(isAligned(@as(usize, 8), 4));
-    try std.testing.expect(!isAligned(@as(usize, 1), 4));
-    try std.testing.expect(!isAligned(@as(usize, 3), 4));
+    const align4 = std.mem.Alignment.@"4";
+    try std.testing.expect(isAligned(@as(usize, 0), align4));
+    try std.testing.expect(isAligned(@as(usize, 4), align4));
+    try std.testing.expect(isAligned(@as(usize, 8), align4));
+    try std.testing.expect(!isAligned(@as(usize, 1), align4));
+    try std.testing.expect(!isAligned(@as(usize, 3), align4));
 }
 
 test "alignedSize" {
-    try std.testing.expectEqual(@as(usize, 4), alignedSize(1, 4));
-    try std.testing.expectEqual(@as(usize, 4), alignedSize(4, 4));
-    try std.testing.expectEqual(@as(usize, 8), alignedSize(5, 4));
-    try std.testing.expectEqual(@as(usize, 16), alignedSize(13, 8));
+    const align4 = std.mem.Alignment.@"4";
+    const align8 = std.mem.Alignment.@"8";
+    try std.testing.expectEqual(@as(usize, 4), alignedSize(1, align4));
+    try std.testing.expectEqual(@as(usize, 4), alignedSize(4, align4));
+    try std.testing.expectEqual(@as(usize, 8), alignedSize(5, align4));
+    try std.testing.expectEqual(@as(usize, 16), alignedSize(13, align8));
 }
 
 test "alignmentPadding" {
-    try std.testing.expectEqual(@as(usize, 3), alignmentPadding(1, 4));
-    try std.testing.expectEqual(@as(usize, 0), alignmentPadding(4, 4));
-    try std.testing.expectEqual(@as(usize, 3), alignmentPadding(5, 4));
+    const align4 = std.mem.Alignment.@"4";
+    try std.testing.expectEqual(@as(usize, 3), alignmentPadding(1, align4));
+    try std.testing.expectEqual(@as(usize, 0), alignmentPadding(4, align4));
+    try std.testing.expectEqual(@as(usize, 3), alignmentPadding(5, align4));
 }
 
 test "ByteSize formatting" {
@@ -454,12 +422,12 @@ test "MemoryRegion shrink and expand" {
 test "MemoryRegion alignment" {
     const region = MemoryRegion{ .start = 100, .len = 100 };
 
-    try std.testing.expect(!region.isStartAligned(16));
-    try std.testing.expect(region.isStartAligned(4));
+    try std.testing.expect(!region.isStartAligned(std.mem.Alignment.@"16"));
+    try std.testing.expect(region.isStartAligned(std.mem.Alignment.@"4"));
 
-    const aligned = region.alignStartUp(16);
+    const aligned = region.alignStartUp(std.mem.Alignment.@"16");
     try std.testing.expectEqual(@as(usize, 112), aligned.start);
-    try std.testing.expect(aligned.isStartAligned(16));
+    try std.testing.expect(aligned.isStartAligned(std.mem.Alignment.@"16"));
 }
 
 test "MemoryRegion distanceTo" {
