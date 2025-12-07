@@ -27,50 +27,27 @@ const GB = 1024 * MB;
 const TB = 1024 * GB;
 const PB = 1024 * TB;
 
-/// Human-readable byte size formatting
-pub const ByteSize = struct {
-    bytes: usize,
-
-    /// Format the byte size into human-readable form.
-    /// Examples: "512 B", "2.00 KiB", "3.00 MiB", "1.50 GiB"
-    ///
-    pub fn format(
-        self: ByteSize,
-        writer: *std.io.Writer,
-    ) !void {
-        if (self.bytes >= PB) {
-            try writer.print("{d:.2} PiB", .{@as(f64, @floatFromInt(self.bytes)) / (PB)});
-        } else if (self.bytes >= TB) {
-            try writer.print("{d:.2} TiB", .{@as(f64, @floatFromInt(self.bytes)) / (TB)});
-        } else if (self.bytes >= GB) {
-            try writer.print("{d:.2} GiB", .{@as(f64, @floatFromInt(self.bytes)) / (GB)});
-        } else if (self.bytes >= MB) {
-            try writer.print("{d:.2} MiB", .{@as(f64, @floatFromInt(self.bytes)) / (MB)});
-        } else if (self.bytes >= KB) {
-            try writer.print("{d:.2} KiB", .{@as(f64, @floatFromInt(self.bytes)) / (KB)});
-        } else {
-            try writer.print("{d} B", .{self.bytes});
-        }
-    }
-};
-
-/// Create a human-readable ByteSize from a number of bytes
-pub fn byteSize(bytes: usize) ByteSize {
-    return .{ .bytes = bytes };
-}
-
-/// Memory region descriptor
+/// Memory region descriptor with utility methods for memory analysis
 pub const MemoryRegion = struct {
     start: usize,
     len: usize,
 
-    /// Get the end address of the region
+    /// Create an empty region
+    pub const empty: MemoryRegion = .{ .start = 0, .len = 0 };
+
+    /// Get the end address of the region (exclusive)
     pub fn end(self: MemoryRegion) usize {
         return self.start + self.len;
     }
 
+    /// Get the size of the region
     pub fn size(self: MemoryRegion) usize {
         return self.len;
+    }
+
+    /// Check if the region is empty
+    pub fn isEmpty(self: MemoryRegion) bool {
+        return self.len == 0;
     }
 
     /// Check if an address is contained within this region
@@ -78,9 +55,102 @@ pub const MemoryRegion = struct {
         return addr >= self.start and addr < self.end();
     }
 
+    /// Check if this region fully contains another region
+    pub fn containsRegion(self: MemoryRegion, other: MemoryRegion) bool {
+        if (other.isEmpty()) return true;
+        return other.start >= self.start and other.end() <= self.end();
+    }
+
     /// Check if this region overlaps with another region
     pub fn overlaps(self: MemoryRegion, other: MemoryRegion) bool {
+        if (self.isEmpty() or other.isEmpty()) return false;
         return self.start < other.end() and other.start < self.end();
+    }
+
+    /// Get the intersection of two regions (the overlapping part)
+    pub fn intersection(self: MemoryRegion, other: MemoryRegion) MemoryRegion {
+        if (!self.overlaps(other)) return empty;
+        const new_start = @max(self.start, other.start);
+        const new_end = @min(self.end(), other.end());
+        return .{ .start = new_start, .len = new_end - new_start };
+    }
+
+    /// Get the union of two regions (smallest region containing both)
+    /// Note: This includes any gap between non-overlapping regions
+    pub fn unionWith(self: MemoryRegion, other: MemoryRegion) MemoryRegion {
+        if (self.isEmpty()) return other;
+        if (other.isEmpty()) return self;
+        const new_start = @min(self.start, other.start);
+        const new_end = @max(self.end(), other.end());
+        return .{ .start = new_start, .len = new_end - new_start };
+    }
+
+    /// Check if the region start is aligned to a given alignment
+    pub fn isStartAligned(self: MemoryRegion, alignment: usize) bool {
+        return isAligned(self.start, alignment);
+    }
+
+    /// Check if both start and length are aligned
+    pub fn isFullyAligned(self: MemoryRegion, alignment: usize) bool {
+        return isAligned(self.start, alignment) and isAligned(self.len, alignment);
+    }
+
+    /// Get the distance (gap) between two non-overlapping regions
+    /// Returns null if regions overlap
+    pub fn distanceTo(self: MemoryRegion, other: MemoryRegion) ?usize {
+        if (self.overlaps(other)) return null;
+        if (self.end() <= other.start) {
+            return other.start - self.end();
+        } else {
+            return self.start - other.end();
+        }
+    }
+
+    /// Split the region at a given offset from the start
+    /// Returns null if offset is out of bounds
+    pub fn splitAt(self: MemoryRegion, offset: usize) ?struct { left: MemoryRegion, right: MemoryRegion } {
+        if (offset > self.len) return null;
+        return .{
+            .left = .{ .start = self.start, .len = offset },
+            .right = .{ .start = self.start + offset, .len = self.len - offset },
+        };
+    }
+
+    /// Shrink the region from the start
+    pub fn shrinkStart(self: MemoryRegion, amount: usize) MemoryRegion {
+        if (amount >= self.len) return empty;
+        return .{ .start = self.start + amount, .len = self.len - amount };
+    }
+
+    /// Shrink the region from the end
+    pub fn shrinkEnd(self: MemoryRegion, amount: usize) MemoryRegion {
+        if (amount >= self.len) return empty;
+        return .{ .start = self.start, .len = self.len - amount };
+    }
+
+    /// Expand the region from the start (decreases start address)
+    pub fn expandStart(self: MemoryRegion, amount: usize) MemoryRegion {
+        if (amount > self.start) return .{ .start = 0, .len = self.len + self.start };
+        return .{ .start = self.start - amount, .len = self.len + amount };
+    }
+
+    /// Expand the region from the end
+    pub fn expandEnd(self: MemoryRegion, amount: usize) MemoryRegion {
+        return .{ .start = self.start, .len = self.len + amount };
+    }
+
+    /// Align the region start up to the given alignment (shrinks region)
+    pub fn alignStartUp(self: MemoryRegion, alignment: usize) MemoryRegion {
+        const aligned_start = std.mem.alignForward(usize, self.start, alignment);
+        if (aligned_start >= self.end()) return empty;
+        return .{ .start = aligned_start, .len = self.end() - aligned_start };
+    }
+
+    /// Align the region end down to the given alignment (shrinks region)
+    pub fn alignEndDown(self: MemoryRegion, alignment: usize) MemoryRegion {
+        const aligned_end = std.mem.alignBackward(usize, self.end(), alignment);
+        if (aligned_end <= self.start) return empty;
+        return .{ .start = self.start, .len = aligned_end - self.start };
     }
 
     /// Create a MemoryRegion from a slice
@@ -92,16 +162,80 @@ pub const MemoryRegion = struct {
     }
 
     /// Create a MemoryRegion from a pointer and length
-    pub fn fromPtr(ptr: *const u8, len: usize) MemoryRegion {
+    pub fn fromPtr(ptr: *const anyopaque) MemoryRegion {
         return .{
             .start = @intFromPtr(ptr),
-            .len = len,
+            .len = @sizeOf(@TypeOf(ptr)),
         };
+    }
+
+    /// Create a MemoryRegion from any typed pointer
+    pub fn fromTypedPtr(comptime T: type, ptr: *const T) MemoryRegion {
+        return .{
+            .start = @intFromPtr(ptr),
+            .len = @sizeOf(T),
+        };
+    }
+
+    /// Create a MemoryRegion from a range of addresses
+    pub fn fromRange(start_addr: usize, end_addr: usize) MemoryRegion {
+        if (end_addr <= start_addr) return empty;
+        return .{ .start = start_addr, .len = end_addr - start_addr };
+    }
+
+    /// Get the module name containing this memory region's start address.
+    /// Only works in debug/safe builds. Caller owns returned memory.
+    pub fn getModuleName(self: MemoryRegion, allocator: std.mem.Allocator) ![]const u8 {
+        if (self.isEmpty()) {
+            return try allocator.dupe(u8, "(empty region)");
+        }
+
+        const debug_info = std.debug.getSelfDebugInfo() catch {
+            return try allocator.dupe(u8, "(debug info unavailable)");
+        };
+
+        const module = debug_info.getModuleForAddress(self.start) catch {
+            return try allocator.dupe(u8, "(no module)");
+        };
+
+        const symbol = try module.getSymbolAtAddress(allocator, module.base_address);
+        return try allocator.dupe(u8, symbol.name);
+    }
+
+    /// Get symbol information for the start address of this region.
+    /// Only works in debug/safe builds. Caller owns returned memory.
+    pub fn getSymbolInfo(self: MemoryRegion, allocator: std.mem.Allocator) ![]const u8 {
+        if (self.isEmpty()) {
+            return try allocator.dupe(u8, "(empty region)");
+        }
+        return resolveSourceLocation(allocator, self.start);
+    }
+
+    /// Format the region as a human-readable string.
+    /// Caller owns returned memory.
+    pub fn formatRegion(self: MemoryRegion, allocator: std.mem.Allocator) ![]const u8 {
+        return std.fmt.allocPrint(allocator, "0x{x}..0x{x} ({f})", .{
+            self.start,
+            self.end(),
+            byteSize(self.len),
+        });
+    }
+
+    /// Std formatter support
+    pub fn format(
+        self: MemoryRegion,
+        writer: *std.io.Writer,
+    ) !void {
+        try writer.print("0x{x}..0x{x} ({f})", .{ self.start, self.end(), byteSize(self.len) });
     }
 };
 
 /// Scope marker for stack allocators - enables save/restore patterns
 pub fn ScopeMarker(comptime AllocatorType: type) type {
+    switch (AllocatorType) {
+        @import("stack_allocator.zig").StackAllocator => {},
+        else => @compileError("ScopeMarker only supports StackAllocator type"),
+    }
     return struct {
         allocator: *AllocatorType,
         saved_index: usize,
@@ -119,6 +253,52 @@ pub fn ScopeMarker(comptime AllocatorType: type) type {
             self.allocator.end_index = self.saved_index;
         }
     };
+}
+
+/// Human-readable byte size formatting
+pub const ByteSize = struct {
+    bytes: usize,
+
+    /// Format the byte size into human-readable form using std.fmt
+    pub fn format(
+        self: ByteSize,
+        writer: *std.io.Writer,
+    ) !void {
+        if (self.bytes >= PB) {
+            try writer.print("{d:.2} PiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, PB)});
+        } else if (self.bytes >= TB) {
+            try writer.print("{d:.2} TiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, TB)});
+        } else if (self.bytes >= GB) {
+            try writer.print("{d:.2} GiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, GB)});
+        } else if (self.bytes >= MB) {
+            try writer.print("{d:.2} MiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, MB)});
+        } else if (self.bytes >= KB) {
+            try writer.print("{d:.2} KiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, KB)});
+        } else {
+            try writer.print("{d} B", .{self.bytes});
+        }
+    }
+
+    /// Format to an allocated string. Caller owns returned memory.
+    pub fn formatAlloc(self: ByteSize, allocator: std.mem.Allocator) error{OutOfMemory}![]const u8 {
+        if (self.bytes >= PB) {
+            return std.fmt.allocPrint(allocator, "{d:.2} PiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, PB)});
+        } else if (self.bytes >= TB) {
+            return std.fmt.allocPrint(allocator, "{d:.2} TiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, TB)});
+        } else if (self.bytes >= GB) {
+            return std.fmt.allocPrint(allocator, "{d:.2} GiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, GB)});
+        } else if (self.bytes >= MB) {
+            return std.fmt.allocPrint(allocator, "{d:.2} MiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, MB)});
+        } else if (self.bytes >= KB) {
+            return std.fmt.allocPrint(allocator, "{d:.2} KiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, KB)});
+        } else {
+            return std.fmt.allocPrint(allocator, "{d} B", .{self.bytes});
+        }
+    }
+};
+
+pub fn byteSize(bytes: usize) ByteSize {
+    return ByteSize{ .bytes = bytes };
 }
 
 /// Format a symbol address into a human-readable source location string.
@@ -203,4 +383,164 @@ test "MemoryRegion" {
 
     try std.testing.expect(region1.overlaps(region2));
     try std.testing.expect(!region1.overlaps(region3));
+}
+
+test "MemoryRegion empty" {
+    const empty = MemoryRegion.empty;
+    try std.testing.expect(empty.isEmpty());
+    try std.testing.expectEqual(@as(usize, 0), empty.size());
+}
+
+test "MemoryRegion containsRegion" {
+    const outer = MemoryRegion{ .start = 100, .len = 100 };
+    const inner = MemoryRegion{ .start = 120, .len = 30 };
+    const partial = MemoryRegion{ .start = 150, .len = 100 };
+
+    try std.testing.expect(outer.containsRegion(inner));
+    try std.testing.expect(!outer.containsRegion(partial));
+    try std.testing.expect(outer.containsRegion(MemoryRegion.empty));
+}
+
+test "MemoryRegion intersection" {
+    const r1 = MemoryRegion{ .start = 100, .len = 50 };
+    const r2 = MemoryRegion{ .start = 120, .len = 50 };
+    const r3 = MemoryRegion{ .start = 200, .len = 50 };
+
+    const inter = r1.intersection(r2);
+    try std.testing.expectEqual(@as(usize, 120), inter.start);
+    try std.testing.expectEqual(@as(usize, 30), inter.len);
+
+    const no_inter = r1.intersection(r3);
+    try std.testing.expect(no_inter.isEmpty());
+}
+
+test "MemoryRegion unionWith" {
+    const r1 = MemoryRegion{ .start = 100, .len = 50 };
+    const r2 = MemoryRegion{ .start = 120, .len = 50 };
+
+    const u = r1.unionWith(r2);
+    try std.testing.expectEqual(@as(usize, 100), u.start);
+    try std.testing.expectEqual(@as(usize, 70), u.len);
+}
+
+test "MemoryRegion splitAt" {
+    const region = MemoryRegion{ .start = 100, .len = 100 };
+
+    const split = region.splitAt(30).?;
+    try std.testing.expectEqual(@as(usize, 100), split.left.start);
+    try std.testing.expectEqual(@as(usize, 30), split.left.len);
+    try std.testing.expectEqual(@as(usize, 130), split.right.start);
+    try std.testing.expectEqual(@as(usize, 70), split.right.len);
+
+    try std.testing.expect(region.splitAt(200) == null);
+}
+
+test "MemoryRegion shrink and expand" {
+    const region = MemoryRegion{ .start = 100, .len = 100 };
+
+    const shrunk_start = region.shrinkStart(20);
+    try std.testing.expectEqual(@as(usize, 120), shrunk_start.start);
+    try std.testing.expectEqual(@as(usize, 80), shrunk_start.len);
+
+    const shrunk_end = region.shrinkEnd(20);
+    try std.testing.expectEqual(@as(usize, 100), shrunk_end.start);
+    try std.testing.expectEqual(@as(usize, 80), shrunk_end.len);
+
+    const expanded_end = region.expandEnd(50);
+    try std.testing.expectEqual(@as(usize, 100), expanded_end.start);
+    try std.testing.expectEqual(@as(usize, 150), expanded_end.len);
+}
+
+test "MemoryRegion alignment" {
+    const region = MemoryRegion{ .start = 100, .len = 100 };
+
+    try std.testing.expect(!region.isStartAligned(16));
+    try std.testing.expect(region.isStartAligned(4));
+
+    const aligned = region.alignStartUp(16);
+    try std.testing.expectEqual(@as(usize, 112), aligned.start);
+    try std.testing.expect(aligned.isStartAligned(16));
+}
+
+test "MemoryRegion distanceTo" {
+    const r1 = MemoryRegion{ .start = 100, .len = 50 };
+    const r2 = MemoryRegion{ .start = 200, .len = 50 };
+    const r3 = MemoryRegion{ .start = 120, .len = 50 };
+
+    try std.testing.expectEqual(@as(?usize, 50), r1.distanceTo(r2));
+    try std.testing.expect(r1.distanceTo(r3) == null); // overlapping
+}
+
+test "MemoryRegion format" {
+    const region = MemoryRegion{ .start = 0x1000, .len = 256 };
+    var buf: [128]u8 = undefined;
+    const str = try std.fmt.bufPrint(&buf, "{f}", .{region});
+    std.debug.print("Formatted region: {s}\n", .{str});
+    try std.testing.expect(std.mem.indexOf(u8, str, "0x1000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, str, "256 B") != null);
+}
+
+test "MemoryRegion fromPtr" {
+    var data: [100]u8 = undefined;
+    const region = MemoryRegion.fromPtr(&data);
+    const size = @sizeOf(@TypeOf(&data));
+    try std.testing.expectEqual(@intFromPtr(&data), region.start);
+    try std.testing.expectEqual(@as(usize, 8), region.len);
+    try std.testing.expect(!region.isEmpty());
+
+    // Verify the region contains the data's address
+    try std.testing.expect(region.contains(@intFromPtr(&data)));
+    try std.testing.expect(!region.contains(@intFromPtr(&data) + size));
+    try std.testing.expect(!region.contains(@intFromPtr(&data) + 100)); // end is exclusive
+}
+
+test "MemoryRegion fromTypedPtr" {
+    const TestStruct = struct {
+        a: u32,
+        b: u64,
+        c: bool,
+    };
+
+    const instance = TestStruct{ .a = 42, .b = 123, .c = true };
+    const region = MemoryRegion.fromTypedPtr(TestStruct, &instance);
+
+    try std.testing.expectEqual(@intFromPtr(&instance), region.start);
+    try std.testing.expectEqual(@sizeOf(TestStruct), region.len);
+    try std.testing.expect(!region.isEmpty());
+}
+
+test "MemoryRegion fromRange" {
+    // Normal range
+    const region = MemoryRegion.fromRange(0x1000, 0x2000);
+    try std.testing.expectEqual(@as(usize, 0x1000), region.start);
+    try std.testing.expectEqual(@as(usize, 0x1000), region.len);
+    try std.testing.expectEqual(@as(usize, 0x2000), region.end());
+    try std.testing.expect(!region.isEmpty());
+
+    // Empty range (start == end)
+    const empty1 = MemoryRegion.fromRange(0x1000, 0x1000);
+    try std.testing.expect(empty1.isEmpty());
+
+    // Invalid range (end < start) should return empty
+    const empty2 = MemoryRegion.fromRange(0x2000, 0x1000);
+    try std.testing.expect(empty2.isEmpty());
+
+    // Zero range
+    const zero_region = MemoryRegion.fromRange(0, 100);
+    try std.testing.expectEqual(@as(usize, 0), zero_region.start);
+    try std.testing.expectEqual(@as(usize, 100), zero_region.len);
+}
+
+test "MemoryRegion fromSlice" {
+    var buffer: [256]u8 = undefined;
+    const slice: []u8 = buffer[50..150];
+    const region = MemoryRegion.fromSlice(slice);
+
+    try std.testing.expectEqual(@intFromPtr(slice.ptr), region.start);
+    try std.testing.expectEqual(@as(usize, 100), region.len);
+
+    // Empty slice
+    const empty_slice: []u8 = buffer[0..0];
+    const empty_region = MemoryRegion.fromSlice(empty_slice);
+    try std.testing.expect(empty_region.isEmpty());
 }
