@@ -15,6 +15,7 @@ A collection of memory allocators and utilities for Zig.
 - **Pool Allocator**: O(1) fixed-size object allocation with zero fragmentation
 - **Scoped Allocator**: RAII-style allocation scopes with automatic cleanup
 - **Counting Allocator**: Simple wrapper for tracking allocation counts and bytes
+- **Thread-Safe Allocator**: Mutex-protected wrapper for any allocator
 - **Memory Utilities**: Alignment helpers, byte formatting, and memory region tools
 - **Zero External Dependencies**: Pure Zig implementation with no external dependencies
 
@@ -169,6 +170,20 @@ std.debug.print("Depth: {}, Bytes: {}\n", .{nested.currentDepth(), stack.bytesUs
 try nested.pop();
 ```
 
+### Thread-Safe Allocator
+
+```zig
+const mem = @import("zevy_mem");
+
+// Wrap any allocator to make it thread-safe
+var ts_alloc = mem.ThreadSafeAllocator.init(std.heap.page_allocator);
+const allocator = ts_alloc.allocator();
+
+// Safe to use from multiple threads
+const data = try allocator.alloc(u8, 100);
+defer allocator.free(data);
+```
+
 ## API Reference
 
 ### StackAllocator
@@ -243,6 +258,15 @@ Hierarchical allocation scopes with automatic state restoration.
 - `currentDepth() usize`: Current nesting level
 - `currentScopeBytes() usize`: Bytes allocated in current scope (since last push)
 - `bufferChanged() bool`: Check if buffer was modified during scope
+
+### ThreadSafeAllocator
+
+Mutex-protected wrapper for thread-safe access to any allocator.
+
+#### Functions
+- `init(backing_allocator: Allocator) ThreadSafeAllocator`: Create with backing allocator
+- `allocator() std.mem.Allocator`: Get thread-safe allocator interface
+- `getInner() Allocator`: Get direct access to backing allocator (not thread-safe)
 
 ### Memory Utilities
 
@@ -360,12 +384,14 @@ pub fn runWithMemoryTracking() !void {
 | Allocator | Alloc | Free | Memory Overhead |
 |-----------|-------|------|-----------------|
 | StackAllocator | O(1) | O(1)* | 0 bytes |
-| DebugStackAllocator | O(1) | O(n)** | ~80 bytes/allocation |
+| DebugAllocator | O(1) | O(n)** | ~80 bytes/allocation |
 | PoolAllocator | O(1) | O(1) | 0 bytes per slot |
 | ScopedAllocator | O(1) | O(1) | 16 bytes per scope |
+| ThreadSafeAllocator | O(1)*** | O(1)*** | ~40 bytes (mutex) |
 
 \* Only LIFO frees reclaim memory  
-\** n = number of tracked allocations (linear search)
+\** n = number of tracked allocations (linear search)  
+\*** Plus mutex lock/unlock overhead; may block on contention
 
 ## Limitations
 

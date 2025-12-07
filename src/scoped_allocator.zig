@@ -163,6 +163,62 @@ pub fn NestedScope(comptime max_depth: usize) type {
     };
 }
 
+/// Nested scoped allocator using heap allocations for scope states.
+pub const NestedScopeHeap = struct {
+    const Self = @This();
+
+    const ScopeState = struct {
+        index: usize,
+        buffer_ptr: ?[*]u8,
+    };
+
+    inner: *StackAllocator,
+    stack: std.ArrayList(ScopeState),
+
+    /// Initialize with a given base allocator and stack allocator.
+    ///
+    /// Base allocator is only used for internal storage of scope states.
+    pub fn init(base_allocator: std.mem.Allocator, stack_allocator: *StackAllocator) error{OutOfMemory}!Self {
+        return Self{
+            .inner = stack_allocator,
+            .stack = try std.ArrayList(ScopeState).initCapacity(base_allocator, 4),
+        };
+    }
+
+    pub fn deinit(self: *Self, base_allocator: std.mem.Allocator) void {
+        self.stack.deinit(base_allocator);
+    }
+
+    /// Push a new scope level, saving the current allocation state.
+    pub fn push(self: *Self) error{OutOfMemory}!void {
+        try self.stack.append(.{
+            .index = self.inner.bytesUsed(),
+            .buffer_ptr = if (self.inner.buffer) |buf| buf.ptr else null,
+        });
+    }
+
+    /// Pop the current scope level, restoring allocations to the saved state.
+    /// All allocations made since the last push are invalidated.
+    pub fn pop(self: *Self) error{BufferChanged}!void {
+        const last_index = self.stack.len - 1;
+        const saved = self.stack.items[last_index];
+        self.stack.pop();
+
+        const current_ptr: ?[*]u8 = if (self.inner.buffer) |buf| buf.ptr else null;
+
+        if (saved.buffer_ptr != current_ptr) {
+            return error.BufferChanged;
+        }
+
+        self.inner.end_index = saved.index;
+    }
+
+    /// Get the allocator interface.
+    pub fn allocator(self: *Self) std.mem.Allocator {
+        return self.inner.allocator();
+    }
+};
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -194,21 +250,23 @@ test "nested scopes" {
     var buffer: [1024]u8 = undefined;
     var stack = StackAllocator.initBuffer(&buffer);
     var nested = NestedScope(4).init(&stack);
-
+    const allocator = nested.allocator();
     // Level 0
     _ = try nested.allocator().alloc(u8, 50);
     try std.testing.expectEqual(@as(usize, 50), stack.bytesUsed());
+    try std.testing.expectEqual(@as(usize, 0), nested.currentDepth());
+    try std.testing.expectEqual(@as(usize, 50), nested.currentScopeBytes());
 
     // Push level 1
     try nested.push();
-    _ = try nested.allocator().alloc(u8, 100);
+    _ = try allocator.alloc(u8, 100);
     try std.testing.expectEqual(@as(usize, 150), stack.bytesUsed());
     try std.testing.expectEqual(@as(usize, 1), nested.currentDepth());
     try std.testing.expectEqual(@as(usize, 100), nested.currentScopeBytes());
 
     // Push level 2
     try nested.push();
-    _ = try nested.allocator().alloc(u8, 200);
+    _ = try allocator.alloc(u8, 200);
     try std.testing.expectEqual(@as(usize, 350), stack.bytesUsed());
     try std.testing.expectEqual(@as(usize, 2), nested.currentDepth());
     try std.testing.expectEqual(@as(usize, 200), nested.currentScopeBytes());

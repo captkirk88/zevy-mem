@@ -9,10 +9,10 @@ pub const StackAllocator = struct {
     end_index: usize,
 
     /// Initialize with no buffer. Must call `setBuffer` or `growBuffer` before allocating.
-    pub fn init() StackAllocator {
-        var buffer: [*]u8 = undefined;
+    pub fn init(comptime size: usize) StackAllocator {
+        var buffer: [size]u8 = undefined;
         return .{
-            .buffer = buffer[0..0],
+            .buffer = buffer[0..size],
             .end_index = 0,
         };
     }
@@ -156,7 +156,7 @@ pub fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, _: usize) 
 // ============================================================================
 
 test "init without buffer" {
-    var stack = StackAllocator.init();
+    var stack = StackAllocator.init(0);
     try std.testing.expectEqual(@as(usize, 0), stack.capacity());
     try std.testing.expectEqual(@as(usize, 0), stack.bytesRemaining());
 
@@ -167,7 +167,7 @@ test "init without buffer" {
 }
 
 test "setBuffer" {
-    var stack = StackAllocator.init();
+    var stack = StackAllocator.init(0);
     var buffer: [1024]u8 = undefined;
 
     stack.setBuffer(&buffer);

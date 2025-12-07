@@ -7,6 +7,7 @@ pub const CountingAllocator = @import("counting_allocator.zig").CountingAllocato
 pub const PoolAllocator = @import("pool_allocator.zig").PoolAllocator;
 pub const ScopedAllocator = @import("scoped_allocator.zig").ScopedAllocator;
 pub const NestedScope = @import("scoped_allocator.zig").NestedScope;
+pub const ThreadSafeAllocator = @import("threadsafe_allocator.zig").ThreadSafeAllocator;
 
 pub const utils = @import("mem_utils.zig");
 pub const isAligned = utils.isAligned;
