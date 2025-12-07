@@ -19,9 +19,6 @@ A collection of memory allocators and utilities for Zig.
 - **Memory Utilities**: Alignment helpers, byte formatting, and memory region tools
 - **Zero External Dependencies**: Pure Zig implementation with no external dependencies
 
-> [!NOTE]
-> `DebugAllocator` requires a backing allocator for its internal tracking ArrayList. For fully heap-free operation, use `initBuffer()`.
-
 ## Installation
 
 Add to your `build.zig.zon`:
