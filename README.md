@@ -2,6 +2,10 @@
 
 A collection of memory allocators and utilities for Zig with no heap dependencies.
 
+[license]: https://img.shields.io/github/license/captkirk88/zevy-mem?style=for-the-badge&logo=opensourcehardware&label=License&logoColor=C0CAF5&labelColor=414868&color=8c73cc
+
+[![][license]](https://github.com/captkirk88/zevy-mem/blob/main/LICENSE)
+
 [![Zig Version](https://img.shields.io/badge/zig-0.15.1+-blue.svg)](https://ziglang.org/)
 
 ## Features
