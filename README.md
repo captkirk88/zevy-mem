@@ -1,6 +1,6 @@
 # zevy-mem
 
-A collection of memory allocators and utilities for Zig with no heap dependencies.
+A collection of memory allocators and utilities for Zig.
 
 [license]: https://img.shields.io/github/license/captkirk88/zevy-mem?style=for-the-badge&logo=opensourcehardware&label=License&logoColor=C0CAF5&labelColor=414868&color=8c73cc
 
@@ -10,13 +10,16 @@ A collection of memory allocators and utilities for Zig with no heap dependencie
 
 ## Features
 
-- **Stack Allocator**: Fast bump allocator with LIFO freeing, no heap required
-- **Debug Allocator**: Full allocation tracking with leak detection and statistics
+- **Stack Allocator**: Fast bump allocator with LIFO freeing, supports heap-free operation with external buffers
+- **Debug Allocator**: Full allocation tracking with leak detection, statistics, and source location resolution
 - **Pool Allocator**: O(1) fixed-size object allocation with zero fragmentation
 - **Scoped Allocator**: RAII-style allocation scopes with automatic cleanup
 - **Counting Allocator**: Simple wrapper for tracking allocation counts and bytes
 - **Memory Utilities**: Alignment helpers, byte formatting, and memory region tools
-- **Zero Dependencies**: Pure Zig implementation with no external dependencies
+- **Zero External Dependencies**: Pure Zig implementation with no external dependencies
+
+> [!NOTE]
+> `DebugAllocator` requires a backing allocator for its internal tracking ArrayList. For fully heap-free operation, use `initBuffer()`.
 
 ## Installation
 

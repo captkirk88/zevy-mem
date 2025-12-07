@@ -23,8 +23,7 @@ pub const ScopedAllocator = struct {
     /// End the scope, restoring to the saved state.
     /// All allocations made within this scope are invalidated.
     ///
-    /// In debug builds, panics if the buffer was changed during the scope.
-    /// In release builds, attempts recovery but behavior may be undefined.
+    /// Returns an error if the underlying buffer has changed.
     pub fn end(self: *ScopedAllocator) error{BufferChanged}!void {
         // Validate buffer hasn't changed
         const current_ptr: ?[*]u8 = if (self.inner.buffer) |buf| buf.ptr else null;
@@ -57,8 +56,32 @@ pub const ScopedAllocator = struct {
 /// Nested scope support - allows hierarchical temporary allocations.
 /// Supports automatic state restoration when popping scopes.
 ///
-/// WARNING: Do not call `growBuffer` on the underlying StackAllocator
-/// while scopes are active. This will cause undefined behavior.
+/// **WARNING: Do not call `growBuffer` on the underlying StackAllocator
+/// while scopes are active. This will cause undefined behavior.**
+///
+/// Example:
+/// ```zig
+/// var buffer: [1024]u8 = undefined;
+/// var stack = StackAllocator.initBuffer(&buffer);
+/// var nested = NestedScope(4).init(&stack);
+///
+/// // Level 0
+/// _ = try nested.allocator().alloc(u8, 50);
+///
+/// // Push level 1
+/// try nested.push();
+/// _ = try nested.allocator().alloc(u8, 100);
+///
+/// // Push level 2
+/// try nested.push();
+/// _ = try nested.allocator().alloc(u8, 200);
+///
+/// // Pop level 2 - restores to level 1 state
+/// try nested.pop();
+///
+/// // Pop level 1 - restores to level 0 state
+/// try nested.pop();
+/// ```
 pub fn NestedScope(comptime max_depth: usize) type {
     return struct {
         const Self = @This();

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Simple counting allocator for tracking allocations
+/// Simple counting allocator for tracking allocations and memory usage
 pub const CountingAllocator = struct {
     /// Returns a duplicate of this allocator, preserving the underlying allocator but resetting stats
     pub fn duplicate(self: *const CountingAllocator) CountingAllocator {
