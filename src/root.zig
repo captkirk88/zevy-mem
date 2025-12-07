@@ -17,6 +17,19 @@ pub const byteSize = utils.byteSize;
 pub const ByteSize = utils.ByteSize;
 pub const MemoryRegion = utils.MemoryRegion;
 
+pub fn toThreadSafe(allocator: anytype) ThreadSafeAllocator {
+    switch (@TypeOf(allocator)) {
+        std.mem.Allocator => return ThreadSafeAllocator.init(allocator),
+        ThreadSafeAllocator => return allocator,
+        StackAllocator => return ThreadSafeAllocator.init(allocator.allocator()),
+        DebugAllocator => return ThreadSafeAllocator.init(allocator.allocator()),
+        CountingAllocator => return ThreadSafeAllocator.init(allocator.allocator()),
+        PoolAllocator => return ThreadSafeAllocator.init(allocator.allocator()),
+        ScopedAllocator => return ThreadSafeAllocator.init(allocator.allocator()),
+        else => @compileError("Unsupported allocator type"),
+    }
+}
+
 test {
     std.testing.refAllDeclsRecursive(@This());
 }

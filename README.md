@@ -181,102 +181,6 @@ const data = try allocator.alloc(u8, 100);
 defer allocator.free(data);
 ```
 
-## API Reference
-
-### StackAllocator
-
-A bump/stack allocator using a fixed buffer with LIFO freeing.
-
-#### Functions
-- `init() StackAllocator`: Create without buffer (must call `setBuffer` before use)
-- `initBuffer(buffer: []u8) StackAllocator`: Create with external buffer
-- `allocator() std.mem.Allocator`: Get standard allocator interface
-- `setBuffer(buffer: []u8)`: Set/replace buffer, resetting state
-- `growBuffer(new_buffer: []u8) !void`: Replace buffer, copying existing data
-- `reset()`: Reset allocator, invalidating all allocations
-- `bytesUsed() usize`: Current allocated bytes
-- `bytesRemaining() usize`: Available bytes
-- `capacity() usize`: Total buffer size
-
-### DebugStackAllocator(max_allocations)
-
-Debug wrapper with full allocation tracking.
-
-#### Types
-- `AllocationInfo`: Detailed info per allocation (ptr, len, timestamp, return address, etc.)
-- `AllocationStats`: Aggregate statistics (peak usage, total bytes, failed allocations, etc.)
-
-#### Functions
-- `init() Self`: Create without buffer
-- `initBuffer(buffer: []u8) Self`: Create with buffer
-- `allocator() std.mem.Allocator`: Get allocator interface
-- `detectLeaks() bool`: Returns true if active allocations exist
-- `activeAllocationCount() usize`: Count of unfreed allocations
-- `dumpLeaks()`: Print detailed leak report to debug output
-- `getStats() AllocationStats`: Get allocation statistics
-- `getAllocationInfo(ptr) ?AllocationInfo`: Get info for specific allocation
-- `getLargestAllocations(out: []AllocationInfo) usize`: Get largest active allocations
-
-### PoolAllocator(T)
-
-Fixed-size pool for uniform objects with O(1) operations.
-
-#### Functions
-- `initBuffer(buffer: []Slot) Self`: Create with external slot buffer
-- `initHeap(allocator, slot_count) !Self`: Create with heap allocation
-- `alloc() ?*T`: Allocate a slot
-- `create(value: T) ?*T`: Allocate and initialize
-- `free(ptr: *T)`: Return slot to pool
-- `count() usize`: Currently allocated slots
-- `capacity() usize`: Total slots
-- `available() usize`: Free slots
-- `reset()`: Free all allocations
-
-### ScopedAllocator
-
-RAII-style scope for automatic cleanup.
-
-#### Functions
-- `begin(stack: *StackAllocator) ScopedAllocator`: Create a scope, saving current state
-- `end() !void`: End scope, restoring to saved state (returns error if buffer changed)
-- `allocator() std.mem.Allocator`: Get allocator interface
-- `scopeBytes() usize`: Bytes allocated within this scope
-- `bufferChanged() bool`: Check if buffer was modified during scope
-
-### NestedScope(max_depth)
-
-Hierarchical allocation scopes with automatic state restoration.
-
-#### Functions
-- `init(stack: *StackAllocator) Self`: Create nested scope manager
-- `push() !void`: Push new scope level, saving current state
-- `pop() !void`: Pop scope level, restoring allocations to saved state
-- `allocator() std.mem.Allocator`: Get allocator interface
-- `currentDepth() usize`: Current nesting level
-- `currentScopeBytes() usize`: Bytes allocated in current scope (since last push)
-- `bufferChanged() bool`: Check if buffer was modified during scope
-
-### ThreadSafeAllocator
-
-Mutex-protected wrapper for thread-safe access to any allocator.
-
-#### Functions
-- `init(backing_allocator: Allocator) ThreadSafeAllocator`: Create with backing allocator
-- `allocator() std.mem.Allocator`: Get thread-safe allocator interface
-- `getInner() Allocator`: Get direct access to backing allocator (not thread-safe)
-
-### Memory Utilities
-
-#### Functions
-- `isAligned(ptr, alignment) bool`: Check pointer alignment
-- `alignedSize(size, alignment) usize`: Calculate aligned size
-- `alignmentPadding(size, alignment) usize`: Calculate padding needed
-- `byteSize(bytes) ByteSize`: Create formattable byte size
-
-#### Types
-- `ByteSize`: Human-readable byte formatting (B, KiB, MiB, GiB, TiB, PiB)
-- `MemoryRegion`: Describes a memory region with overlap/contains checks
-
 ## Examples
 
 ### Game Frame Allocator Pattern
@@ -381,20 +285,23 @@ pub fn runWithMemoryTracking() !void {
 | Allocator | Alloc | Free | Memory Overhead |
 |-----------|-------|------|-----------------|
 | StackAllocator | O(1) | O(1)* | 0 bytes |
-| DebugAllocator | O(1) | O(n)** | ~80 bytes/allocation |
-| PoolAllocator | O(1) | O(1) | 0 bytes per slot |
-| ScopedAllocator | O(1) | O(1) | 16 bytes per scope |
-| ThreadSafeAllocator | O(1)*** | O(1)*** | ~40 bytes (mutex) |
+| DebugAllocator | O(1) | O(n)** | ~72 bytes/allocation |
+| PoolAllocator | O(1) | O(1) | max(sizeof(T), 8) per slot*** |
+| ScopedAllocator | O(1) | O(1) | 24 bytes per scope |
+| NestedScope | O(1) | O(1) | 16 bytes per depth level |
+| CountingAllocator | O(1) | O(1) | 24 bytes (wrapper state) |
+| ThreadSafeAllocator | O(1)**** | O(1)**** | ~40 bytes (mutex, platform-dependent) |
 
 \* Only LIFO frees reclaim memory  
-\** n = number of tracked allocations (linear search)  
-\*** Plus mutex lock/unlock overhead; may block on contention
+\** n = number of tracked allocations (linear search in `findAllocation`)  
+\*** Slot size is `@max(@sizeOf(T), @sizeOf(?*anyopaque))` to accommodate the free list pointer  
+\**** Plus mutex lock/unlock overhead; may block on contention
 
 ## Limitations
 
 - **LIFO Freeing**: Stack allocators only reclaim memory for the most recent allocation
 - **Fixed Capacity**: Pool and debug allocators have compile-time limits
-- **No Thread Safety**: All allocators are single-threaded
+- **No Thread Safety**: All allocators are single-threaded unless wrapped in ThreadSafeAllocator
 - **Buffer Ownership**: Caller manages buffer lifetime
 
 ## Contributing
