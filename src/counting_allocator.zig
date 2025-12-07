@@ -1,11 +1,7 @@
 const std = @import("std");
-
+const TrackingAllocator = @import("interface.zig").TrackingAllocator;
 /// Simple counting allocator for tracking allocations and memory usage
 pub const CountingAllocator = struct {
-    /// Returns a duplicate of this allocator, preserving the underlying allocator but resetting stats
-    pub fn duplicate(self: *const CountingAllocator) CountingAllocator {
-        return create(self.inner_allocator);
-    }
     inner_allocator: std.mem.Allocator,
     bytes_allocated: usize,
     allocs_count: usize,
@@ -23,7 +19,7 @@ pub const CountingAllocator = struct {
         };
     }
 
-    fn create(base_allocator: std.mem.Allocator) CountingAllocator {
+    pub fn init(base_allocator: std.mem.Allocator) CountingAllocator {
         return CountingAllocator{
             .inner_allocator = base_allocator,
             .bytes_allocated = 0,
@@ -31,8 +27,8 @@ pub const CountingAllocator = struct {
         };
     }
 
-    pub fn init(base_allocator: std.mem.Allocator) CountingAllocator {
-        return create(base_allocator);
+    pub fn bytesUsed(self: *CountingAllocator) usize {
+        return self.bytes_allocated;
     }
 
     pub fn reset(self: *CountingAllocator) void {

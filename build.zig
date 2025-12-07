@@ -4,10 +4,18 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const interface_dep = b.lazyDependency("interface", .{
+        .target = target,
+        .optimize = optimize,
+    }) orelse return error.ZigInterface_DepNotFound;
+
     const mod = b.addModule("zevy_mem", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "interface", .module = interface_dep.module("interface") },
+        },
     });
 
     // Creates an executable that will run `test` blocks from the provided module.

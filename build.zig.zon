@@ -6,7 +6,12 @@
 
     .minimum_zig_version = "0.15.1",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .interface = .{
+            .url = "git+https://github.com/nilslice/zig-interface#19f2c937b77e42b15bc8cacaa2894ce5b783d94d",
+            .hash = "interface-0.0.2-GFlWJ7KOAQAkHikqZU0XV86AhX7R9jCyGza85lTIqcEU",
+        },
+    },
 
     .paths = .{
         "build.zig",

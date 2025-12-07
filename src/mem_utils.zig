@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const TrackingAllocator = @import("interface.zig").TrackingAllocator;
 
 /// Check if a pointer is aligned to the given alignment
 pub fn isAligned(ptr: anytype, alignment: std.mem.Alignment) bool {
@@ -161,15 +162,45 @@ pub const MemoryRegion = struct {
     pub fn fromSlice(slice: []const u8) MemoryRegion {
         return .{
             .start = @intFromPtr(slice.ptr),
-            .len = slice.len,
+            // Length in bytes: number of elements * size of each element
+            .len = slice.len * @sizeOf(@TypeOf(slice[0])),
         };
     }
 
-    /// Create a MemoryRegion from a pointer and length
+    /// Convert the MemoryRegion to a slice
+    pub fn toSlice(self: MemoryRegion) []u8 {
+        const ptr: [*]u8 = @ptrFromInt(self.start);
+        return ptr[0..self.len];
+    }
+
+    /// Create a MemoryRegion from a pointer
+    ///
+    /// Size is determined by the type size of the pointer.
     pub fn fromPtr(ptr: *const anyopaque) MemoryRegion {
         return .{
             .start = @intFromPtr(ptr),
             .len = @sizeOf(@TypeOf(ptr)),
+        };
+    }
+
+    pub fn fromRawPtr(ptr: *u8) MemoryRegion {
+        const bytes = std.mem.asBytes(ptr);
+        return .{
+            .start = @intFromPtr(ptr),
+            .len = bytes.len,
+        };
+    }
+
+    pub fn toPtr(self: MemoryRegion) *const anyopaque {
+        return @ptrFromInt(self.start);
+    }
+
+    /// Create a MemoryRegion from a pointer with explicit length.
+    /// Use this when you need to preserve the region length through pointer conversions.
+    pub fn fromPtrWithLen(ptr: *const anyopaque, len: usize) MemoryRegion {
+        return .{
+            .start = @intFromPtr(ptr),
+            .len = len,
         };
     }
 
@@ -208,10 +239,7 @@ pub const MemoryRegion = struct {
 
 /// Scope marker for stack allocators - enables save/restore patterns
 pub fn ScopeMarker(comptime AllocatorType: type) type {
-    switch (AllocatorType) {
-        @import("stack_allocator.zig").StackAllocator => {},
-        else => @compileError("ScopeMarker only supports StackAllocator type currently"),
-    }
+    comptime TrackingAllocator.validation.satisfiedBy(AllocatorType);
     return struct {
         allocator: *AllocatorType,
         saved_index: usize,
@@ -450,16 +478,18 @@ test "MemoryRegion format" {
 
 test "MemoryRegion fromPtr" {
     var data: [100]u8 = undefined;
+    const ptr = &data;
     const region = MemoryRegion.fromPtr(&data);
-    const size = @sizeOf(@TypeOf(&data));
-    try std.testing.expectEqual(@intFromPtr(&data), region.start);
-    try std.testing.expectEqual(@as(usize, 8), region.len);
+    try std.testing.expectEqual(@intFromPtr(ptr), region.start);
+    // fromPtr records the size of the pointer type (can't recover the pointee size
+    // from an untyped pointer), so expect pointer size (e.g. 8 bytes on x86_64).
+    try std.testing.expectEqual(@as(usize, @sizeOf(@TypeOf(ptr))), region.len);
     try std.testing.expect(!region.isEmpty());
 
     // Verify the region contains the data's address
-    try std.testing.expect(region.contains(@intFromPtr(&data)));
-    try std.testing.expect(!region.contains(@intFromPtr(&data) + size));
-    try std.testing.expect(!region.contains(@intFromPtr(&data) + 100)); // end is exclusive
+    try std.testing.expect(region.contains(@intFromPtr(ptr)));
+    try std.testing.expect(!region.contains(@intFromPtr(ptr) + @sizeOf(@TypeOf(data))));
+    try std.testing.expect(!region.contains(@intFromPtr(ptr) + 100)); // end is exclusive
 }
 
 test "MemoryRegion fromTypedPtr" {
@@ -512,3 +542,81 @@ test "MemoryRegion fromSlice" {
     const empty_region = MemoryRegion.fromSlice(empty_slice);
     try std.testing.expect(empty_region.isEmpty());
 }
+
+test "MemoryRegion toSlice and toPtr" {
+    var buffer: [256]u8 = undefined;
+    // Initialize just the endpoints we'll check to avoid integer-cast narrowing issues
+    buffer[50] = 0x11;
+    buffer[149] = 0x22;
+
+    const slice: []u8 = buffer[50..150];
+    const region_slice = MemoryRegion.fromSlice(slice);
+
+    const s = region_slice.toSlice();
+    const p = region_slice.toPtr();
+    const back_to_region_from_slice = MemoryRegion.fromSlice(s);
+    const back_to_region_from_ptr = MemoryRegion.fromPtrWithLen(p, region_slice.len);
+
+    std.debug.print("Original region (slice): {f}, New region (slice): {f}\n", .{ region_slice, back_to_region_from_slice });
+    std.debug.print("Original region (slice): {f}, New region (ptr): {f}\n", .{ region_slice, back_to_region_from_ptr });
+    try std.testing.expectEqual(@intFromPtr(slice.ptr), @intFromPtr(s.ptr));
+    try std.testing.expectEqual(@sizeOf(@TypeOf(slice)), @sizeOf(@TypeOf(s)));
+    try std.testing.expectEqual(slice[0], s[0]);
+    // `s.len` is the number of bytes returned by `toSlice` (which uses `sizeOf`); only
+    // compare values that exist within that range.
+    try std.testing.expectEqual(slice[s.len - 1], s[s.len - 1]);
+
+    // Round-trip via slice preserves the full region
+    try std.testing.expectEqual(region_slice.start, back_to_region_from_slice.start);
+    try std.testing.expectEqual(region_slice.len, back_to_region_from_slice.len);
+
+    // Round-trip via pointer with explicit length preserves the full region
+    try std.testing.expectEqual(@intFromPtr(s.ptr), @intFromPtr(p));
+    try std.testing.expectEqual(region_slice.start, back_to_region_from_ptr.start);
+    try std.testing.expectEqual(region_slice.len, back_to_region_from_ptr.len);
+}
+
+test "ScopeMarker save and restore" {
+    const StackAllocator = @import("stack_allocator.zig").StackAllocator;
+    const Marker = ScopeMarker(StackAllocator);
+
+    var stack = StackAllocator.init(1024);
+    const alloc = stack.allocator();
+
+    // Initial state
+    try std.testing.expectEqual(@as(usize, 0), stack.bytesUsed());
+
+    // Allocate some memory
+    const data1 = try alloc.alloc(u8, 100);
+    try std.testing.expectEqual(@as(usize, 100), stack.bytesUsed());
+
+    // Save the marker
+    const marker = Marker.save(&stack);
+    try std.testing.expectEqual(@as(usize, 100), marker.saved_index);
+
+    // Allocate more memory
+    const data2 = try alloc.alloc(u8, 50);
+    try std.testing.expectEqual(@as(usize, 150), stack.bytesUsed());
+
+    _ = data1;
+    _ = data2;
+
+    // Restore to the saved state
+    marker.restore();
+    try std.testing.expectEqual(@as(usize, 100), stack.bytesUsed());
+
+    // Can allocate again from the restored position
+    const data3 = try alloc.alloc(u8, 25);
+    try std.testing.expectEqual(@as(usize, 125), stack.bytesUsed());
+
+    _ = data3;
+}
+
+// test "ScopeMarker incompatible Allocator" {
+//     const AllocType = std.heap.ArenaAllocator;
+
+//     // This should fail to compile if uncommented, as ArenaAllocator
+//     // does not satisfy the TrackingAllocator interface.
+//     //
+//     _ = ScopeMarker(AllocType);
+// }
