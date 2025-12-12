@@ -7,9 +7,9 @@
     .minimum_zig_version = "0.15.1",
 
     .dependencies = .{
-        .interface = .{
-            .url = "git+https://github.com/nilslice/zig-interface#19f2c937b77e42b15bc8cacaa2894ce5b783d94d",
-            .hash = "interface-0.0.2-GFlWJ7KOAQAkHikqZU0XV86AhX7R9jCyGza85lTIqcEU",
+        .zevy_reflect = .{
+            .url = "git+https://github.com/captkirk88/zevy-reflect#0af13754eb91df989d820e42093542f894acedfd",
+            .hash = "zevy_reflect-0.0.1-8SzYxtTbAACHQG9U4fSoUZgGjACGifF8e9kFoPbPjUrj",
         },
     },
 

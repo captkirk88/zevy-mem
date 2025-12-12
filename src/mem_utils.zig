@@ -176,28 +176,28 @@ pub const MemoryRegion = struct {
     /// Create a MemoryRegion from a pointer
     ///
     /// Size is determined by the type size of the pointer.
-    pub fn fromPtr(ptr: *const anyopaque) MemoryRegion {
+    pub fn fromPtr(ptr: [*]u8) MemoryRegion {
         return .{
             .start = @intFromPtr(ptr),
             .len = @sizeOf(@TypeOf(ptr)),
         };
     }
 
-    pub fn fromRawPtr(ptr: *u8) MemoryRegion {
-        const bytes = std.mem.asBytes(ptr);
+    pub fn fromRawPtr(ptr: [*]u8) MemoryRegion {
+        const bytes = std.mem.asBytes(ptr[0..@sizeOf(@TypeOf(ptr))]);
         return .{
             .start = @intFromPtr(ptr),
             .len = bytes.len,
         };
     }
 
-    pub fn toPtr(self: MemoryRegion) *const anyopaque {
+    pub fn toPtr(self: MemoryRegion) [*]u8 {
         return @ptrFromInt(self.start);
     }
 
     /// Create a MemoryRegion from a pointer with explicit length.
     /// Use this when you need to preserve the region length through pointer conversions.
-    pub fn fromPtrWithLen(ptr: *const anyopaque, len: usize) MemoryRegion {
+    pub fn fromPtrWithLen(ptr: [*]u8, len: usize) MemoryRegion {
         return .{
             .start = @intFromPtr(ptr),
             .len = len,
