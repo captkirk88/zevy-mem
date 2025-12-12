@@ -4,17 +4,18 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const interface_dep = b.lazyDependency("interface", .{
+    const reflect_dep = b.lazyDependency("zevy_reflect", .{
         .target = target,
         .optimize = optimize,
-    }) orelse return error.ZigInterface_DepNotFound;
+    }) orelse return error.ZevyReflectDependencyNotFound;
+    const reflect_mod = reflect_dep.module("zevy_reflect");
 
     const mod = b.addModule("zevy_mem", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "interface", .module = interface_dep.module("interface") },
+            .{ .name = "zevy_reflect", .module = reflect_mod },
         },
     });
 

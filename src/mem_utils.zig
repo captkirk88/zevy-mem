@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const zevy_reflect = @import("zevy_reflect");
 const TrackingAllocator = @import("interface.zig").TrackingAllocator;
 
 /// Check if a pointer is aligned to the given alignment
@@ -239,7 +240,7 @@ pub const MemoryRegion = struct {
 
 /// Scope marker for stack allocators - enables save/restore patterns
 pub fn ScopeMarker(comptime AllocatorType: type) type {
-    comptime TrackingAllocator.validation.satisfiedBy(AllocatorType);
+    comptime zevy_reflect.Implements(TrackingAllocator).validate(AllocatorType);
     return struct {
         allocator: *AllocatorType,
         saved_index: usize,
