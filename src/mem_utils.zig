@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const zevy_reflect = @import("zevy_reflect");
-const TrackingAllocator = @import("interface.zig").TrackingAllocator;
+const TrackingAllocator = @import("interfaces.zig").TrackingAllocator;
 
 /// Check if a pointer is aligned to the given alignment
 pub fn isAligned(ptr: anytype, alignment: std.mem.Alignment) bool {
@@ -240,22 +240,35 @@ pub const MemoryRegion = struct {
 
 /// Scope marker for stack allocators - enables save/restore patterns
 pub fn ScopeMarker(comptime AllocatorType: type) type {
-    comptime zevy_reflect.Implements(TrackingAllocator).validate(AllocatorType);
+    comptime zevy_reflect.Interface(TrackingAllocator).validate(AllocatorType);
     return struct {
         allocator: *AllocatorType,
-        saved_index: usize,
+        saved_index: usize = 0,
+        last_index: usize = 0,
+        pub const VTable = zevy_reflect.Interface(TrackingAllocator).vTable(AllocatorType);
 
         const Self = @This();
-
-        pub fn save(alloc: *AllocatorType) Self {
+        pub fn init(alloc: *AllocatorType) Self {
             return .{
                 .allocator = alloc,
-                .saved_index = alloc.bytesUsed(),
+                .saved_index = VTable.bytesUsed(alloc),
             };
         }
 
-        pub fn restore(self: Self) void {
-            self.allocator.end_index = self.saved_index;
+        pub fn save(self: *Self) *Self {
+            self.last_index = self.saved_index;
+            self.saved_index = VTable.bytesUsed(self.allocator);
+            return self;
+        }
+
+        pub fn restore(self: *Self) void {
+            const current_index = VTable.bytesUsed(self.allocator);
+            if (self.saved_index < current_index) {
+                // Reset the allocator to the saved index
+                self.last_index = self.saved_index;
+                const new_index = VTable.rewind(self.allocator, current_index - self.saved_index);
+                self.saved_index = new_index;
+            }
         }
     };
 }
@@ -579,9 +592,9 @@ test "MemoryRegion toSlice and toPtr" {
 
 test "ScopeMarker save and restore" {
     const StackAllocator = @import("stack_allocator.zig").StackAllocator;
-    const Marker = ScopeMarker(StackAllocator);
 
     var stack = StackAllocator.init(1024);
+    var Marker = ScopeMarker(StackAllocator).init(&stack);
     const alloc = stack.allocator();
 
     // Initial state
@@ -592,7 +605,7 @@ test "ScopeMarker save and restore" {
     try std.testing.expectEqual(@as(usize, 100), stack.bytesUsed());
 
     // Save the marker
-    const marker = Marker.save(&stack);
+    const marker = Marker.save();
     try std.testing.expectEqual(@as(usize, 100), marker.saved_index);
 
     // Allocate more memory
@@ -612,12 +625,3 @@ test "ScopeMarker save and restore" {
 
     _ = data3;
 }
-
-// test "ScopeMarker incompatible Allocator" {
-//     const AllocType = std.heap.ArenaAllocator;
-
-//     // This should fail to compile if uncommented, as ArenaAllocator
-//     // does not satisfy the TrackingAllocator interface.
-//     //
-//     _ = ScopeMarker(AllocType);
-// }

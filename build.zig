@@ -1,4 +1,5 @@
 const std = @import("std");
+const reflect = @import("zevy_reflect");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});

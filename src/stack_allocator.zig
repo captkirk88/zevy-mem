@@ -64,6 +64,18 @@ pub const StackAllocator = struct {
         self.end_index = 0;
     }
 
+    /// Rewind the allocator to a previous index.
+    pub fn rewind(self: *StackAllocator, bytes: usize) usize {
+        if (bytes > self.end_index) {
+            const rewound = self.end_index;
+            self.end_index = 0;
+            return rewound;
+        } else {
+            self.end_index -= bytes;
+            return bytes;
+        }
+    }
+
     /// Returns the number of bytes currently allocated.
     pub fn bytesUsed(self: *const StackAllocator) usize {
         return self.end_index;
@@ -125,6 +137,7 @@ pub fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len:
     return true;
 }
 
+/// Stack allocator cannot remap memory to a different location
 pub fn remap(
     _: *anyopaque,
     _: []u8,
@@ -132,7 +145,6 @@ pub fn remap(
     _: usize,
     _: usize,
 ) ?[*]u8 {
-    // Stack allocator cannot remap memory to a different location
     return null;
 }
 

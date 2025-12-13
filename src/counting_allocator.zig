@@ -1,5 +1,6 @@
 const std = @import("std");
-const TrackingAllocator = @import("interface.zig").TrackingAllocator;
+const TrackingAllocator = @import("interfaces.zig").TrackingAllocator;
+
 /// Simple counting allocator for tracking allocations and memory usage
 pub const CountingAllocator = struct {
     inner_allocator: std.mem.Allocator,
