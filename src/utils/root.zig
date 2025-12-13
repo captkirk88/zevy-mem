@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const zevy_reflect = @import("zevy_reflect");
-const TrackingAllocator = @import("interfaces.zig").TrackingAllocator;
+const TrackingAllocator = @import("../interfaces.zig").TrackingAllocator;
 
 /// Check if a pointer is aligned to the given alignment
 pub fn isAligned(ptr: anytype, alignment: std.mem.Alignment) bool {
@@ -22,12 +22,6 @@ pub fn alignedSize(size: usize, alignment: std.mem.Alignment) usize {
 pub fn alignmentPadding(size: usize, alignment: std.mem.Alignment) usize {
     return alignedSize(size, alignment) - size;
 }
-
-const KB = 1024;
-const MB = 1024 * KB;
-const GB = 1024 * MB;
-const TB = 1024 * GB;
-const PB = 1024 * TB;
 
 /// Memory region descriptor with utility methods for memory analysis
 pub const MemoryRegion = struct {
@@ -272,6 +266,12 @@ pub fn ScopeMarker(comptime AllocatorType: type) type {
     };
 }
 
+const KB = 1024;
+const MB = 1024 * KB;
+const GB = 1024 * MB;
+const TB = 1024 * GB;
+const PB = 1024 * TB;
+
 /// Human-readable byte size formatting
 pub const ByteSize = struct {
     bytes: usize,
@@ -281,6 +281,7 @@ pub const ByteSize = struct {
         self: ByteSize,
         writer: *std.io.Writer,
     ) !void {
+        // If you ever come across a Petabyte of data in Zig, please let me know :)
         if (self.bytes >= PB) {
             try writer.print("{d:.2} PiB", .{@as(f64, @floatFromInt(self.bytes)) / @as(f64, PB)});
         } else if (self.bytes >= TB) {
@@ -589,7 +590,7 @@ test "MemoryRegion toSlice and toPtr" {
 }
 
 test "ScopeMarker save and restore" {
-    const StackAllocator = @import("stack_allocator.zig").StackAllocator;
+    const StackAllocator = @import("../stack_allocator.zig").StackAllocator;
 
     var stack = StackAllocator.init(1024);
     var Marker = ScopeMarker(StackAllocator).init(&stack);

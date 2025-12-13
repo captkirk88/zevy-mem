@@ -6,9 +6,10 @@ pub const DebugAllocator = @import("debug_allocator.zig").DebugAllocator;
 pub const CountingAllocator = @import("counting_allocator.zig").CountingAllocator;
 pub const PoolAllocator = @import("pool_allocator.zig").PoolAllocator;
 pub const ScopedAllocator = @import("scoped_allocator.zig").ScopedAllocator;
+pub const CautiousAllocator = @import("cautious_allocator.zig").CautiousAllocator;
 pub const NestedScope = @import("scoped_allocator.zig").NestedScope;
 
-pub const utils = @import("mem_utils.zig");
+pub const utils = @import("utils/root.zig");
 
 pub fn toThreadSafe(allocator: anytype) std.heap.ThreadSafeAllocator {
     const allocator_type = @TypeOf(allocator);

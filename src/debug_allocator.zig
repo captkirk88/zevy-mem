@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
-const util = @import("mem_utils.zig");
+const util = @import("utils/root.zig");
 
 /// Debug wrapper around any std.mem.Allocator that tracks allocations for leak detection.
 /// Uses dynamic allocation for tracking (allocates from the backing allocator).
@@ -228,7 +228,7 @@ pub const DebugAllocator = struct {
 
     /// Print allocation statistics.
     pub fn dumpStats(self: *const Self) void {
-        const utils = @import("mem_utils.zig");
+        const utils = @import("utils/root.zig");
         std.debug.print("\n=== ALLOCATION STATISTICS ===\n", .{});
         std.debug.print("Total allocations: {d}\n", .{self.stats.total_allocations});
         std.debug.print("Total frees: {d}\n", .{self.stats.total_frees});
