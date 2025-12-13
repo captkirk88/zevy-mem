@@ -9,12 +9,6 @@ pub const ScopedAllocator = @import("scoped_allocator.zig").ScopedAllocator;
 pub const NestedScope = @import("scoped_allocator.zig").NestedScope;
 
 pub const utils = @import("mem_utils.zig");
-pub const isAligned = utils.isAligned;
-pub const alignedSize = utils.alignedSize;
-pub const alignmentPadding = utils.alignmentPadding;
-pub const byteSize = utils.byteSize;
-pub const ByteSize = utils.ByteSize;
-pub const MemoryRegion = utils.MemoryRegion;
 
 pub fn toThreadSafe(allocator: anytype) std.heap.ThreadSafeAllocator {
     const allocator_type = @TypeOf(allocator);

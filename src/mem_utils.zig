@@ -240,33 +240,32 @@ pub const MemoryRegion = struct {
 
 /// Scope marker for stack allocators - enables save/restore patterns
 pub fn ScopeMarker(comptime AllocatorType: type) type {
-    comptime zevy_reflect.Interface(TrackingAllocator).validate(AllocatorType);
+    const vt = comptime zevy_reflect.Interface(TrackingAllocator).vTable(AllocatorType);
     return struct {
         allocator: *AllocatorType,
         saved_index: usize = 0,
         last_index: usize = 0,
-        pub const VTable = zevy_reflect.Interface(TrackingAllocator).vTable(AllocatorType);
 
         const Self = @This();
         pub fn init(alloc: *AllocatorType) Self {
             return .{
                 .allocator = alloc,
-                .saved_index = VTable.bytesUsed(alloc),
+                .saved_index = vt.bytesUsed(alloc),
             };
         }
 
         pub fn save(self: *Self) *Self {
             self.last_index = self.saved_index;
-            self.saved_index = VTable.bytesUsed(self.allocator);
+            self.saved_index = vt.bytesUsed(self.allocator);
             return self;
         }
 
         pub fn restore(self: *Self) void {
-            const current_index = VTable.bytesUsed(self.allocator);
+            const current_index = vt.bytesUsed(self.allocator);
             if (self.saved_index < current_index) {
                 // Reset the allocator to the saved index
                 self.last_index = self.saved_index;
-                const new_index = VTable.rewind(self.allocator, current_index - self.saved_index);
+                const new_index = vt.rewind(self.allocator, current_index - self.saved_index);
                 self.saved_index = new_index;
             }
         }
@@ -327,7 +326,6 @@ pub fn formatSymbolAddress(allocator: std.mem.Allocator, debug_info: *std.debug.
 }
 
 /// Resolve a return address to a human-readable source location string.
-/// Only works in debug builds with debug info available.
 /// Caller owns the returned memory.
 pub fn resolveSourceLocation(allocator: std.mem.Allocator, address: usize) ![]const u8 {
     if (address == 0) {
