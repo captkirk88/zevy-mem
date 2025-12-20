@@ -1,5 +1,6 @@
 //! zevy-mem: Memory allocators for Zig with no heap dependencies.
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const StackAllocator = @import("stack_allocator.zig").StackAllocator;
 pub const DebugAllocator = @import("debug_allocator.zig").DebugAllocator;

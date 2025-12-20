@@ -1,7 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const zevy_reflect = @import("zevy_reflect");
-const TrackingAllocator = @import("../interfaces.zig").TrackingAllocator;
+const interfaces = @import("../interfaces.zig");
+const mem = @import("mem.zig");
+
+pub const TrackingAllocator = interfaces.TrackingAllocator;
+
+pub const getMemoryInfo = mem.getMemoryInfo;
+pub const MemoryInfo = mem.MemoryInfo;
 
 /// Check if a pointer is aligned to the given alignment
 pub fn isAligned(ptr: anytype, alignment: std.mem.Alignment) bool {
@@ -234,32 +240,33 @@ pub const MemoryRegion = struct {
 
 /// Scope marker for stack allocators - enables save/restore patterns
 pub fn ScopeMarker(comptime AllocatorType: type) type {
-    const vt = comptime zevy_reflect.Interface(TrackingAllocator).vTable(AllocatorType);
     return struct {
-        allocator: *AllocatorType,
+        allocator: TrackingAllocator,
         saved_index: usize = 0,
         last_index: usize = 0,
 
         const Self = @This();
         pub fn init(alloc: *AllocatorType) Self {
-            return .{
-                .allocator = alloc,
-                .saved_index = vt.bytesUsed(alloc),
+            var iface: interfaces.TrackingAllocatorTemplate.Interface = undefined;
+            interfaces.TrackingAllocatorTemplate.populate(&iface, alloc);
+            return Self{
+                .allocator = iface,
+                .saved_index = iface.vtable.bytesUsed(iface.ptr),
             };
         }
 
         pub fn save(self: *Self) *Self {
             self.last_index = self.saved_index;
-            self.saved_index = vt.bytesUsed(self.allocator);
+            self.saved_index = self.allocator.vtable.bytesUsed(self.allocator.ptr);
             return self;
         }
 
         pub fn restore(self: *Self) void {
-            const current_index = vt.bytesUsed(self.allocator);
+            const current_index = self.allocator.vtable.bytesUsed(self.allocator.ptr);
             if (self.saved_index < current_index) {
                 // Reset the allocator to the saved index
                 self.last_index = self.saved_index;
-                const new_index = vt.rewind(self.allocator, current_index - self.saved_index);
+                const new_index: usize = self.allocator.vtable.rewind(self.allocator.ptr, current_index - self.saved_index);
                 self.saved_index = new_index;
             }
         }

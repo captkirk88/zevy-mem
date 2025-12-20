@@ -1,18 +1,21 @@
 const std = @import("std");
+const reflect = @import("zevy_reflect");
+
+pub const TrackingAllocatorTemplate = reflect.Template(struct {
+    pub const Name: []const u8 = "TrackingAllocator";
+
+    pub fn bytesUsed(_: *const @This()) usize {
+        unreachable;
+    }
+
+    pub fn rewind(_: *const @This(), _: usize) usize {
+        unreachable;
+    }
+
+    pub fn allocator(_: *const @This()) std.mem.Allocator {
+        unreachable;
+    }
+});
 
 /// An interface for an allocator that tracks the number of bytes used.
-pub const TrackingAllocator = struct {
-    ptr: *anyopaque,
-
-    pub fn bytesUsed(self: *const @This()) usize {
-        return self.ptr.bytesUsed();
-    }
-
-    pub fn rewind(self: *const @This(), bytes: usize) void {
-        self.ptr.rewind(bytes);
-    }
-
-    pub fn allocator(self: *const @This()) std.mem.Allocator {
-        return self.ptr.allocator();
-    }
-};
+pub const TrackingAllocator = TrackingAllocatorTemplate.Interface;
