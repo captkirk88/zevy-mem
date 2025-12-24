@@ -71,7 +71,7 @@ pub const StackAllocator = struct {
             self.end_index = 0;
             return rewound;
         } else {
-            self.end_index -= bytes;
+            self.end_index = self.end_index - bytes;
             return bytes;
         }
     }

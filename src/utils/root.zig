@@ -618,9 +618,6 @@ test "ScopeMarker save and restore" {
     const data2 = try alloc.alloc(u8, 50);
     try std.testing.expectEqual(@as(usize, 150), stack.bytesUsed());
 
-    _ = data1;
-    _ = data2;
-
     // Restore to the saved state
     marker.restore();
     try std.testing.expectEqual(@as(usize, 100), stack.bytesUsed());
@@ -629,5 +626,7 @@ test "ScopeMarker save and restore" {
     const data3 = try alloc.alloc(u8, 25);
     try std.testing.expectEqual(@as(usize, 125), stack.bytesUsed());
 
+    _ = data1;
+    _ = data2;
     _ = data3;
 }

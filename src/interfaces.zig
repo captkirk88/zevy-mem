@@ -8,7 +8,7 @@ pub const TrackingAllocatorTemplate = reflect.Template(struct {
         unreachable;
     }
 
-    pub fn rewind(_: *const @This(), _: usize) usize {
+    pub fn rewind(_: *@This(), _: usize) usize {
         unreachable;
     }
 
