@@ -14,6 +14,10 @@ pub const GuardedAllocator = @import("guarded_allocator.zig").GuardedAllocator;
 
 pub const utils = @import("utils/root.zig");
 
+pub const Rc = @import("pointers/rc.zig").Rc;
+pub const Arc = @import("pointers/arc.zig").Arc;
+pub const Mutex = @import("pointers/mutex.zig").Mutex;
+
 pub fn toThreadSafe(allocator: anytype) std.heap.ThreadSafeAllocator {
     const allocator_type = @TypeOf(allocator);
     if (allocator_type == std.mem.Allocator) {

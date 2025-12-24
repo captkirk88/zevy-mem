@@ -48,7 +48,6 @@ pub const SafeAllocator = struct {
                 return error.MemoryLeak;
             }
         }
-        std.debug.print("SafeAllocator: No memory leaks. Allocations: {d}, Deallocations: {d}\n", .{ self.alloc_count, self.dealloc_count });
     }
 
     pub fn allocator(self: *SafeAllocator) Allocator {
@@ -89,14 +88,14 @@ fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usi
 
     const addr = @intFromPtr(buf.ptr);
     if (self.allocations.get(addr) == null) {
-        std.debug.panic("SafeAllocator: Attempt to resize unknown pointer 0x{x}", .{addr});
+        std.debug.panicExtra(ret_addr, "SafeAllocator: Attempt to resize unknown pointer 0x{x}", .{addr});
     }
 
     const ok = self.inner.rawResize(buf, buf_align, new_len, ret_addr);
     if (ok) {
         self.allocations.put(addr, new_len) catch {
             // If update fails, but resize happened, perhaps panic or something
-            @panic("Failed to update allocation map after resize");
+            std.debug.panicExtra(ret_addr, "Failed to update allocation map after resize", .{});
         };
     }
     return ok;
@@ -107,7 +106,7 @@ fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: u
 
     const old_addr = @intFromPtr(memory.ptr);
     if (self.allocations.get(old_addr) == null) {
-        std.debug.panic("SafeAllocator: Attempt to remap unknown pointer 0x{x}", .{old_addr});
+        std.debug.panicExtra(ret_addr, "SafeAllocator: Attempt to remap unknown pointer 0x{x}", .{old_addr});
     }
 
     const result = self.inner.rawRemap(memory, alignment, new_len, ret_addr);
@@ -134,7 +133,7 @@ fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usiz
         self.dealloc_count += 1;
         self.inner.rawFree(buf, buf_align, ret_addr);
     } else {
-        std.debug.panic("SafeAllocator: Double free detected for pointer 0x{x}", .{addr});
+        std.debug.panicExtra(ret_addr, "Double free detected for pointer 0x{x}", .{addr});
     }
 }
 
@@ -150,7 +149,7 @@ test "SafeAllocator prevents double free" {
     const buf = try allocator.alloc(u8, 100);
     allocator.free(buf);
     // This should panic
-    //allocator.free(buf); // uncomment to test double free
+    allocator.free(buf); // uncomment to test double free
 }
 
 test "SafeAllocator detects leaks" {
