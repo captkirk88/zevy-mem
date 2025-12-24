@@ -8,6 +8,7 @@ pub const CountingAllocator = @import("counting_allocator.zig").CountingAllocato
 pub const PoolAllocator = @import("pool_allocator.zig").PoolAllocator;
 pub const ScopedAllocator = @import("scoped_allocator.zig").ScopedAllocator;
 pub const CautiousAllocator = @import("cautious_allocator.zig").CautiousAllocator;
+pub const SafeAllocator = @import("safe_allocator.zig").SafeAllocator;
 pub const NestedScope = @import("scoped_allocator.zig").NestedScope;
 
 pub const utils = @import("utils/root.zig");
