@@ -10,12 +10,13 @@ A collection of memory allocators and utilities for Zig.
 
 ## Features
 
+- **Safe Allocator**: Allocation tracking with leak detection, double-free prevention, and allocation statistics
+- **Guarded Allocator**: Wrap allocators that don't segault to detect buffer overflows using guard pages and segfault
 - **Stack Allocator**: Fast bump allocator with LIFO freeing, supports heap-free operation with external buffers
 - **Debug Allocator**: Full allocation tracking with leak detection, statistics, and source location resolution
 - **Pool Allocator**: O(1) fixed-size object allocation with zero fragmentation
 - **Scoped Allocator**: RAII-style allocation scopes with automatic cleanup
 - **Counting Allocator**: Simple wrapper for tracking allocation counts and bytes
-- **Thread-Safe Allocator**: Mutex-protected wrapper for any allocator
 - **Memory Utilities**: Alignment helpers, byte formatting, and memory region tools
 - **Zero External Dependencies**: Pure Zig implementation with no external dependencies
 
@@ -79,6 +80,24 @@ if (debug.detectLeaks()) {
 // Get statistics
 const stats = debug.getStats();
 std.debug.print("Peak allocations: {}\n", .{stats.peak_active_allocations});
+```
+
+### Safe Allocator (Leak Detection & Double-Free Prevention)
+
+```zig
+const mem = @import("zevy_mem");
+
+var safe = mem.SafeAllocator.init(std.heap.page_allocator, std.testing.allocator);
+defer safe.deinit();
+const allocator = safe.allocator();
+
+const data = try allocator.alloc(u8, 100);
+allocator.free(data);
+
+// Attempt double-free (will panic)
+allocator.free(data); // Panic: Double free detected
+
+// defer safe.deinit() will check for leaks and panic if any remain
 ```
 
 ### Pool Allocator
@@ -167,18 +186,22 @@ std.debug.print("Depth: {}, Bytes: {}\n", .{nested.currentDepth(), stack.bytesUs
 try nested.pop();
 ```
 
-### Thread-Safe Allocator
+### Guarded Allocator (Buffer Overflow Detection)
 
 ```zig
 const mem = @import("zevy_mem");
 
-// Wrap any allocator to make it thread-safe
-var ts_alloc = mem.ThreadSafeAllocator.init(std.heap.page_allocator);
-const allocator = ts_alloc.allocator();
+// Add guard pages around allocations to detect overflows
+var guarded = try mem.GuardedAllocator.init(std.heap.smp_allocator, std.testing.allocator, 1);
+defer guarded.deinit();
+const allocator = guarded.allocator();
 
-// Safe to use from multiple threads
-const data = try allocator.alloc(u8, 100);
-defer allocator.free(data);
+// Allocate with guard pages
+const buf = try allocator.alloc(u8, 100);
+defer allocator.free(buf);
+
+// Overflowing beyond allocated size will cause segmentation fault
+// buf[100] = 42; // Would segfault due to guard page
 ```
 
 ## Examples
@@ -284,33 +307,31 @@ pub fn runWithMemoryTracking() !void {
 
 | Allocator | Alloc | Free | Memory Overhead |
 |-----------|-------|------|-----------------|
+| SafeAllocator | O(1) | O(1) | ~32 bytes/allocation |
+| GuardedAllocator | O(1) | O(1) | 2 * guard_pages * page_size per allocation |
 | StackAllocator | O(1) | O(1)* | 0 bytes |
 | DebugAllocator | O(1) | O(n)** | ~72 bytes/allocation |
 | PoolAllocator | O(1) | O(1) | max(sizeof(T), 8) per slot*** |
 | ScopedAllocator | O(1) | O(1) | 24 bytes per scope |
 | NestedScope | O(1) | O(1) | 16 bytes per depth level |
 | CountingAllocator | O(1) | O(1) | 24 bytes (wrapper state) |
-| ThreadSafeAllocator | O(1)**** | O(1)**** | ~40 bytes (mutex, platform-dependent) |
 
 \* Only LIFO frees reclaim memory  
 \** n = number of tracked allocations (linear search in `findAllocation`)  
-\*** Slot size is `@max(@sizeOf(T), @sizeOf(?*anyopaque))` to accommodate the free list pointer  
-\**** Plus mutex lock/unlock overhead; may block on contention
+\*** Slot size is `@max(@sizeOf(T), @sizeOf(?*anyopaque))` to accommodate the free list pointer
 
 ## Limitations
 
 - **LIFO Freeing**: Stack allocators only reclaim memory for the most recent allocation
 - **Fixed Capacity**: Pool and debug allocators have compile-time limits
-- **No Thread Safety**: All allocators are single-threaded unless wrapped in ThreadSafeAllocator
+- **No Thread Safety**: All allocators are single-threaded
 - **Buffer Ownership**: Caller manages buffer lifetime
+- **SafeAllocator**: Runtime checks with panics; not suitable for production error handling
+- **GuardedAllocator**: High memory overhead from guard pages; segfaults may not provide detailed error info
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass: `zig build test`
-5. Submit a pull request
+Contributions, issues, and feature requests are welcome! Please open an issue or submit a pull request.
 
 ## Related Projects
 
