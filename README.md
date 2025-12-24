@@ -11,7 +11,7 @@ A collection of memory allocators and utilities for Zig.
 ## Features
 
 - **Safe Allocator**: Allocation tracking with leak detection, double-free prevention, and allocation statistics
-- **Guarded Allocator**: Wrap allocators that don't segault to detect buffer overflows using guard pages and segfault
+- **Guarded Allocator**: Wrap allocators that don't segfault to detect buffer overflows using guard pages
 - **Stack Allocator**: Fast bump allocator with LIFO freeing, supports heap-free operation with external buffers
 - **Debug Allocator**: Full allocation tracking with leak detection, statistics, and source location resolution
 - **Pool Allocator**: O(1) fixed-size object allocation with zero fragmentation
