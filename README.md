@@ -19,6 +19,8 @@ A collection of memory allocators and utilities for Zig.
 - **Counting Allocator**: Simple wrapper for tracking allocation counts and bytes
 - **Memory Utilities**: Alignment helpers, byte formatting, and memory region tools
 - **Zero External Dependencies**: Pure Zig implementation with no external dependencies
+- **Safe Pointers**: Reference-counted pointers (Rc and Arc) for safe memory management
+- **Mutex**: Simple mutex implementation for thread safety
 
 ## Installation
 
