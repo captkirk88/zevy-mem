@@ -1,4 +1,5 @@
 const std = @import("std");
+const reflect = @import("zevy_reflect");
 const Allocator = std.mem.Allocator;
 
 /// Thread-safe mutex-protected pointer.
@@ -13,6 +14,23 @@ pub fn Mutex(comptime T: type) type {
             value: T,
             mutex: std.Thread.Mutex,
             allocator: Allocator,
+
+            fn deinit(self: *Inner) void {
+                // Call deinit if the type has one
+                switch (comptime reflect.getReflectInfo(T)) {
+                    .type => |ti| {
+                        if (ti.hasFunc("deinit")) {
+                            self.value.deinit();
+                        }
+                    },
+                    .raw => |ty| {
+                        if (reflect.hasFunc(ty, "deinit")) {
+                            self.value.deinit();
+                        }
+                    },
+                    else => {},
+                }
+            }
         };
 
         /// Guard for scoped mutex access
@@ -79,11 +97,7 @@ pub fn Mutex(comptime T: type) type {
         pub fn deinit(self: *Self) void {
             const inner: *Inner = @ptrCast(@alignCast(self));
 
-            // Call deinit if the type has one
-            const type_info = @typeInfo(T);
-            if ((type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum" or type_info == .@"opaque") and @hasDecl(T, "deinit")) {
-                inner.value.deinit();
-            }
+            inner.deinit();
 
             const allocator = inner.allocator;
             allocator.destroy(inner);
@@ -203,7 +217,7 @@ test "Mutex deinit calls inner deinit" {
 
     const DeinitType = struct {
         deinit_called: *bool,
-        
+
         pub fn deinit(self: *@This()) void {
             self.deinit_called.* = true;
         }

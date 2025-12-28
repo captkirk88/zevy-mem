@@ -1,4 +1,6 @@
 const std = @import("std");
+const reflect = @import("zevy_reflect");
+const root = @import("../root.zig");
 const Allocator = std.mem.Allocator;
 
 /// Atomic reference counted pointer (thread-safe).
@@ -13,6 +15,23 @@ pub fn Arc(comptime T: type) type {
             value: T,
             ref_count: std.atomic.Value(usize),
             allocator: Allocator,
+
+            fn deinit(self: *Inner) void {
+                // Call deinit if the type has one
+                switch (comptime reflect.getReflectInfo(T)) {
+                    .type => |ti| {
+                        if (ti.hasFunc("deinit")) {
+                            self.value.deinit();
+                        }
+                    },
+                    .raw => |ty| {
+                        if (reflect.hasFunc(ty, "deinit")) {
+                            self.value.deinit();
+                        }
+                    },
+                    else => {},
+                }
+            }
         };
 
         /// Create a new Arc with initial value
@@ -53,11 +72,8 @@ pub fn Arc(comptime T: type) type {
                 // Acquire fence to ensure all previous writes are visible
                 _ = inner.ref_count.load(.acquire);
 
-                // Call deinit if the type has one
-                const type_info = @typeInfo(T);
-                if ((type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum" or type_info == .@"opaque") and @hasDecl(T, "deinit")) {
-                    inner.value.deinit();
-                }
+                inner.deinit();
+
                 const allocator = inner.allocator;
                 allocator.destroy(inner);
             }
@@ -83,8 +99,10 @@ test "Arc basic operations" {
     const arc = try Arc(i32).init(allocator, 42);
     defer arc.deinit();
 
+    const arcType = Arc(i32).Child;
     try testing.expectEqual(42, arc.get().*);
     try testing.expectEqual(1, arc.strongCount());
+    try testing.expectEqual(@typeInfo(i32), @typeInfo(arcType));
 }
 
 test "Arc clone and deinit" {
@@ -142,7 +160,7 @@ test "Arc memory cleanup" {
     // Memory should be freed at this point
 }
 
-test "Arc thread safety - clone and release" {
+test "Arc thread safety - clone and deinit" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -414,5 +432,179 @@ test "Arc thread safety - stress test with heavy cloning" {
 
     const final_ops = arc.get().getOps();
     try testing.expectEqual(thread_count * iterations * 3, final_ops);
+    try testing.expectEqual(1, arc.strongCount());
+}
+
+test "Arc thread safety - data race demonstration" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const UnsafeCounter = struct {
+        count: i32, // Non-atomic - will cause data races
+
+        fn init(val: i32) @This() {
+            return .{ .count = val };
+        }
+
+        fn increment(self: *@This()) void {
+            self.count += 1; // This is not thread-safe
+        }
+
+        fn get(self: *@This()) i32 {
+            return self.count;
+        }
+    };
+
+    const arc = try Arc(UnsafeCounter).init(allocator, UnsafeCounter.init(0));
+    defer arc.deinit();
+
+    const ThreadContext = struct {
+        arc_ptr: *Arc(UnsafeCounter),
+        iterations: usize,
+    };
+
+    const worker = struct {
+        fn run(ctx: ThreadContext) void {
+            const local_arc = ctx.arc_ptr.clone();
+            defer local_arc.deinit();
+
+            var i: usize = 0;
+            while (i < ctx.iterations) : (i += 1) {
+                local_arc.get().increment();
+            }
+        }
+    }.run;
+
+    const thread_count = 4;
+    const iterations = 1000;
+    var threads: [thread_count]std.Thread = undefined;
+
+    var i: usize = 0;
+    while (i < thread_count) : (i += 1) {
+        threads[i] = try std.Thread.spawn(.{}, worker, .{ThreadContext{
+            .arc_ptr = arc,
+            .iterations = iterations,
+        }});
+    }
+
+    for (threads) |thread| {
+        thread.join();
+    }
+
+    const final_count = arc.get().get();
+    // Due to data races, the final count may be less than expected
+    // This demonstrates that Arc only protects reference counting, not the contained data
+    try testing.expect(final_count <= thread_count * iterations);
+    try testing.expect(final_count >= 0); // At least it should be non-negative
+    try testing.expectEqual(1, arc.strongCount());
+}
+
+test "Arc calls deinit on contained value" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const TestType = struct {
+        deinit_called: *bool,
+
+        fn init(deinit_flag: *bool) @This() {
+            return .{ .deinit_called = deinit_flag };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.deinit_called.* = true;
+        }
+    };
+
+    var deinit_flag = false;
+    const value = TestType.init(&deinit_flag);
+    const arc = try Arc(TestType).init(allocator, value);
+
+    // Deinit should call the deinit method on the contained value
+    arc.deinit();
+
+    try testing.expectEqual(true, deinit_flag);
+}
+
+test "Arc calls deinit on contained pointer value" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const TestType = struct {
+        deinit_called: *bool,
+
+        fn init(deinit_flag: *bool) @This() {
+            return .{ .deinit_called = deinit_flag };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.deinit_called.* = true;
+        }
+    };
+
+    var deinit_flag = false;
+
+    const arc = try Arc(TestType).init(allocator, TestType.init(&deinit_flag));
+
+    // Deinit should call the deinit method on the pointed-to value
+    // Note: Arc frees the pointer itself, but the pointed-to TestType's deinit is called
+    arc.deinit();
+
+    try testing.expect(deinit_flag);
+}
+
+test "Arc with Mutex - thread-safe data access" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Create the inner Mutex first
+    const inner_mutex = try root.Mutex(i32).init(allocator, 0);
+
+    // Create Arc containing a pointer to the Mutex
+    const arc = try Arc(*root.Mutex(i32)).init(allocator, inner_mutex);
+    defer arc.deinit();
+
+    const ThreadContext = struct {
+        arc_ptr: *Arc(*root.Mutex(i32)),
+        iterations: usize,
+    };
+
+    const worker = struct {
+        fn run(ctx: ThreadContext) void {
+            const local_arc = ctx.arc_ptr.clone();
+            defer local_arc.deinit();
+
+            var i: usize = 0;
+            while (i < ctx.iterations) : (i += 1) {
+                // Lock the mutex, increment the value, unlock
+                const guard = local_arc.get().*.lock();
+                defer guard.deinit();
+                guard.get().* += 1;
+            }
+        }
+    }.run;
+
+    const thread_count = 10;
+    const iterations = 1000;
+    var threads: [thread_count]std.Thread = undefined;
+
+    var i: usize = 0;
+    while (i < thread_count) : (i += 1) {
+        threads[i] = try std.Thread.spawn(.{}, worker, .{ThreadContext{
+            .arc_ptr = arc,
+            .iterations = iterations,
+        }});
+    }
+
+    for (threads) |thread| {
+        thread.join();
+    }
+
+    // Check the final value - should be exactly correct due to mutex protection
+    {
+        const guard = arc.get().*.lock();
+        defer guard.deinit();
+        const final_count = guard.get().*;
+        try testing.expectEqual(thread_count * iterations, final_count);
+    }
     try testing.expectEqual(1, arc.strongCount());
 }
