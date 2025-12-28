@@ -1,14 +1,15 @@
 const std = @import("std");
 const reflect = @import("zevy_reflect");
+const buildtools = @import("zevy_buildtools");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const reflect_dep = b.lazyDependency("zevy_reflect", .{
+    const reflect_dep = b.dependency("zevy_reflect", .{
         .target = target,
         .optimize = optimize,
-    }) orelse return error.ZevyReflectDependencyNotFound;
+    });
     const reflect_mod = reflect_dep.module("zevy_reflect");
 
     const mod = b.addModule("zevy_mem", .{
@@ -35,4 +36,8 @@ pub fn build(b: *std.Build) !void {
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
+
+    try buildtools.fmt.addFmtStep(b, false);
+
+    try buildtools.fetch.addFetchStep(b, b.path("build.zig.zon"));
 }
