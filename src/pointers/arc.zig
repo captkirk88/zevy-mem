@@ -3,7 +3,11 @@ const reflect = @import("zevy_reflect");
 const root = @import("../root.zig");
 const Allocator = std.mem.Allocator;
 
-/// Atomic reference counted pointer (thread-safe).
+/// Atomic reference counted pointer.
+///
+/// Not thread-safe for mutation of the contained data; only the reference counting is atomic.
+///
+/// Use `Arc(*Mutex(T))` for thread-safe data access.
 pub fn Arc(comptime T: type) type {
     return opaque {
         const Self = @This();
