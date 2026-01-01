@@ -12,8 +12,8 @@
             .hash = "zevy_reflect-0.0.1-8SzYxmR0AgCIv3CClZc7sGkrcRmI6IfdLYJ8W2OBnTy-",
         },
         .zevy_buildtools = .{
-            .url = "git+https://github.com/captkirk88/zevy-buildtools#19ebdd781d2a5dd4a71ef60a1e57480ca2ade84f",
-            .hash = "zevy_buildtools-0.0.0-So808T9yAACgz0kLKOrpEXdodhqgxDBBLPy05GKj08FE",
+            .url = "git+https://github.com/captkirk88/zevy-buildtools#ec089b7ab9607311e12ab5a92936702d8df94461",
+            .hash = "zevy_buildtools-0.0.0-So808bhxAADKN4Hd4CWr_EUNIg2xUIqzfKdM_XMD9eum",
         },
     },
 
