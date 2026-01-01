@@ -10,7 +10,7 @@ pub const MemoryInfo = struct {
 };
 
 /// Get the current memory usage and maximum memory limit for the process.
-/// This is cross-platform, supporting Linux, Windows, and macOS.
+/// This is cross-platform, supporting Linux and Windows.
 /// Returns error on failure to retrieve information.
 pub fn getMemoryInfo() !MemoryInfo {
     const target = builtin.target;

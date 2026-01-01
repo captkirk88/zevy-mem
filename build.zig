@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const reflect = @import("zevy_reflect");
 const buildtools = @import("zevy_buildtools");
 
@@ -19,6 +20,7 @@ pub fn build(b: *std.Build) !void {
         .imports = &.{
             .{ .name = "zevy_reflect", .module = reflect_mod },
         },
+        .link_libc = builtin.os.tag == .windows,
     });
 
     // Creates an executable that will run `test` blocks from the provided module.

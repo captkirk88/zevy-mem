@@ -11,7 +11,8 @@ pub const NestedScope = @import("scoped_allocator.zig").NestedScope;
 pub const CautiousAllocator = @import("cautious_allocator.zig").CautiousAllocator;
 pub const SafeAllocator = @import("safe_allocator.zig").SafeAllocator;
 pub const GuardedAllocator = @import("guarded_allocator.zig").GuardedAllocator;
-pub const FileAllocator = @import("file_allocator.zig").FileAllocator;
+pub const MmapAllocator = @import("mmap_allocator.zig").MmapAllocator;
+pub const mmap = @import("platform_mmap.zig");
 
 pub const utils = @import("utils/root.zig");
 
@@ -60,11 +61,6 @@ pub fn toThreadSafe(allocator: anytype) std.heap.ThreadSafeAllocator {
         const ga: *GuardedAllocator = @ptrCast(@constCast(allocator));
         return std.heap.ThreadSafeAllocator{
             .child_allocator = ga.allocator(),
-        };
-    } else if (allocator_type == *FileAllocator or allocator_type == *const FileAllocator) {
-        const fa: *FileAllocator = @ptrCast(@constCast(allocator));
-        return std.heap.ThreadSafeAllocator{
-            .child_allocator = fa.allocator(),
         };
     }
     @compileError("Unsupported allocator type: " ++ @typeName(allocator_type));
