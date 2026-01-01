@@ -17,6 +17,7 @@ A collection of memory allocators and utilities for Zig.
 - **Pool Allocator**: O(1) fixed-size object allocation with zero fragmentation
 - **Scoped Allocator**: RAII-style allocation scopes with automatic cleanup
 - **Counting Allocator**: Simple wrapper for tracking allocation counts and bytes
+- **Memory-Mapped File Allocator**: Allocator backed by memory-mapped file
 - **Memory Utilities**: Alignment helpers, byte formatting, and memory region tools
 - **Zero External Dependencies**: Pure Zig implementation with no external dependencies
 - **Safe Pointers**: Reference-counted pointers (Rc and Arc) for safe memory management
@@ -317,10 +318,13 @@ pub fn runWithMemoryTracking() !void {
 | ScopedAllocator | O(1) | O(1) | 24 bytes per scope |
 | NestedScope | O(1) | O(1) | 16 bytes per depth level |
 | CountingAllocator | O(1) | O(1) | 24 bytes (wrapper state) |
+| MmapAllocator | O(1) | O(1) | O(1) allocation/lookup with file-backed pages; working-set grows only as pages are touched |
 
 \* Only LIFO frees reclaim memory  
 \** n = number of tracked allocations (linear search in `findAllocation`)  
 \*** Slot size is `@max(@sizeOf(T), @sizeOf(?*anyopaque))` to accommodate the free list pointer
+
+The [MmapAllocator runtime-vs-page allocator usage](src/mmap_allocator.zig#L632-L651) test measures working-set deltas and shows how the mmap-backed allocator touches far less resident memory than a straight heap allocation of the same size.
 
 ## Limitations
 
