@@ -11,7 +11,7 @@ pub fn PoolAllocator(comptime T: type) type {
         const Self = @This();
 
         /// A single slot in the pool.
-        const Slot = struct {
+        pub const Slot = struct {
             data: [slot_size]u8 align(slot_align),
 
             fn asValue(self: *Slot) *T {
@@ -73,12 +73,6 @@ pub fn PoolAllocator(comptime T: type) type {
             return self;
         }
 
-        /// Initialize with heap allocation.
-        pub fn initHeap(allocator: std.mem.Allocator, comptime slot_count: usize) !Self {
-            const buffer = try allocator.alloc(Slot, slot_count);
-            return Self.initBuffer(buffer);
-        }
-
         /// Allocate a slot, returning a pointer to the value.
         pub fn alloc(self: *Self) ?*T {
             const slot = self.free_list orelse return null;
@@ -129,6 +123,31 @@ pub fn PoolAllocator(comptime T: type) type {
         /// Returns the number of available slots.
         pub fn available(self: *const Self) usize {
             return self.buffer.len - self.allocated_count;
+        }
+
+        /// Check if a pointer is currently allocated by this allocator.
+        pub fn isAllocated(self: *const Self, ptr: *const anyopaque) bool {
+            const ptr_addr = @intFromPtr(ptr);
+            const buffer_start = @intFromPtr(self.buffer.ptr);
+
+            if (ptr_addr < buffer_start) return false;
+
+            const offset = ptr_addr - buffer_start;
+            const slot_stride = @sizeOf(Slot);
+
+            if (slot_stride > 0 and offset % slot_stride != 0) return false;
+
+            const index = if (slot_stride > 0) offset / slot_stride else 0;
+            if (index >= self.buffer.len) return false;
+
+            // Check if the slot is in the free list
+            var current = self.free_list;
+            while (current) |slot| {
+                const slot_index = (@intFromPtr(slot) - @intFromPtr(self.buffer.ptr)) / @sizeOf(Slot);
+                if (slot_index == index) return false;
+                current = slot.getNextFree();
+            }
+            return true;
         }
 
         /// Reset the pool, freeing all allocations.
@@ -236,18 +255,4 @@ test "pool init with size" {
     try std.testing.expectEqual(@as(usize, 0), pool.count());
     _ = pool.alloc();
     try std.testing.expectEqual(@as(usize, 1), pool.count());
-}
-
-test "pool init heap allocation" {
-    const allocator = std.testing.allocator;
-    var pool = try PoolAllocator(u16).initHeap(allocator, 4);
-    defer allocator.free(pool.buffer);
-
-    try std.testing.expectEqual(@as(usize, 4), pool.capacity());
-    try std.testing.expectEqual(@as(usize, 0), pool.count());
-
-    const ptr = pool.alloc() orelse unreachable;
-    try std.testing.expectEqual(@as(usize, 1), pool.count());
-    pool.free(ptr);
-    try std.testing.expectEqual(@as(usize, 0), pool.count());
 }

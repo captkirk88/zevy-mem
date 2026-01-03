@@ -65,6 +65,12 @@ pub const GuardedAllocator = struct {
             },
         };
     }
+
+    /// Check if a pointer is currently allocated by this allocator.
+    pub fn isAllocated(self: *const GuardedAllocator, ptr: *const anyopaque) bool {
+        const addr = @intFromPtr(ptr);
+        return self.allocations.contains(addr);
+    }
 };
 
 fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {

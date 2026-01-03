@@ -19,3 +19,14 @@ pub const TrackingAllocatorTemplate = reflect.Template(struct {
 
 /// An interface for an allocator that tracks the number of bytes used.
 pub const TrackingAllocator = TrackingAllocatorTemplate.Interface;
+
+pub const OwnershipTrackAllocatorTemplate = reflect.Template(struct {
+    pub const Name: []const u8 = "OwnershipCheckableAllocator";
+
+    pub fn isAllocated(_: *const @This(), _: *const anyopaque) bool {
+        unreachable;
+    }
+});
+
+/// An interface for an allocator that can check if it owns a specific pointer.
+pub const OwnershipTrackAllocator = OwnershipTrackAllocatorTemplate.Interface;

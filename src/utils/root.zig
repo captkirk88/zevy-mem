@@ -29,6 +29,15 @@ pub fn alignmentPadding(size: usize, alignment: std.mem.Alignment) usize {
     return alignedSize(size, alignment) - size;
 }
 
+/// Check if a pointer is currently allocated by the given allocator.
+/// Only works for allocators that support ownership checking (e.g., DebugAllocator, GuardedAllocator, SafeAllocator, PoolAllocator, StackAllocator).
+/// Returns false for allocators that don't support this check or if the pointer is not allocated.
+pub fn isAllocatedBy(allocator: anytype, ptr: *const anyopaque) bool {
+    var interface: interfaces.OwnershipTrackAllocator = undefined;
+    interfaces.OwnershipTrackAllocatorTemplate.populate(&interface, allocator);
+    return interface.vtable.isAllocated(interface.ptr, ptr);
+}
+
 /// Memory region descriptor with utility methods for memory analysis
 pub const MemoryRegion = struct {
     start: usize,
@@ -632,4 +641,63 @@ test "ScopeMarker save and restore" {
     _ = data1;
     _ = data2;
     _ = data3;
+}
+
+test "isAllocatedBy" {
+    const debug_alloc_mod = @import("../debug_allocator.zig");
+    var debug = debug_alloc_mod.DebugAllocator.init(std.testing.allocator);
+    defer debug.deinit();
+
+    const alloc = debug.allocator();
+
+    // Allocate some memory
+    const ptr = try alloc.alloc(u8, 10);
+    try std.testing.expect(isAllocatedBy(&debug, ptr.ptr));
+
+    // Free it
+    alloc.free(ptr);
+    try std.testing.expect(!isAllocatedBy(&debug, ptr.ptr));
+
+    // Test with non-allocated pointer
+    const fake_ptr: *const anyopaque = @ptrFromInt(0x12345678);
+    try std.testing.expect(!isAllocatedBy(&debug, fake_ptr));
+
+    // Test GuardedAllocator
+    const guarded_mod = @import("../guarded_allocator.zig");
+    var guarded = guarded_mod.GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
+    defer guarded.deinit();
+    const guarded_alloc = guarded.allocator();
+    const ptr2 = try guarded_alloc.alloc(u8, 10);
+    try std.testing.expect(isAllocatedBy(&guarded, ptr2.ptr));
+    guarded_alloc.free(ptr2);
+    try std.testing.expect(!isAllocatedBy(&guarded, ptr2.ptr));
+
+    // Test SafeAllocator
+    const safe_mod = @import("../safe_allocator.zig");
+    var safe = safe_mod.SafeAllocator.init(std.testing.allocator, std.testing.allocator);
+    defer _ = safe.deinit() catch {};
+    const safe_alloc = safe.allocator();
+    const ptr3 = try safe_alloc.alloc(u8, 10);
+    try std.testing.expect(isAllocatedBy(&safe, ptr3.ptr));
+    safe_alloc.free(ptr3);
+    try std.testing.expect(!isAllocatedBy(&safe, ptr3.ptr));
+
+    // Test PoolAllocator
+    const pool_mod = @import("../pool_allocator.zig");
+    var pool_buffer: [10]pool_mod.PoolAllocator(u8).Slot = undefined;
+    var pool = pool_mod.PoolAllocator(u8).initBuffer(&pool_buffer);
+    const ptr4 = pool.alloc().?;
+    try std.testing.expect(isAllocatedBy(&pool, ptr4));
+    pool.free(ptr4);
+    try std.testing.expect(!isAllocatedBy(&pool, ptr4));
+
+    // Test StackAllocator
+    const stack_mod = @import("../stack_allocator.zig");
+    var buffer: [100]u8 = undefined;
+    var stack = stack_mod.StackAllocator.initBuffer(&buffer);
+    const stack_alloc = stack.allocator();
+    const ptr5 = try stack_alloc.alloc(u8, 10);
+    try std.testing.expect(isAllocatedBy(&stack, ptr5.ptr));
+    stack.reset();
+    try std.testing.expect(!isAllocatedBy(&stack, ptr5.ptr));
 }

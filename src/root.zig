@@ -4,6 +4,8 @@ const builtin = @import("builtin");
 const reflect = @import("zevy_reflect");
 const mem = @import("utils/root.zig");
 
+pub const interfaces = @import("interfaces.zig");
+
 pub const allocators = struct {
     /// A global StackAllocator instance for general use
     ///

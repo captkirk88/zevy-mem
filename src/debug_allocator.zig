@@ -174,6 +174,14 @@ pub const DebugAllocator = struct {
         return null;
     }
 
+    /// Check if a pointer is currently allocated by this allocator.
+    pub fn isAllocated(self: *const Self, ptr: *const anyopaque) bool {
+        if (self.getAllocationInfo(ptr)) |info| {
+            return info.active;
+        }
+        return false;
+    }
+
     /// Get allocations sorted by size (descending).
     pub fn getLargestAllocations(self: *const Self, out: []AllocationInfo) usize {
         var count: usize = 0;

@@ -94,6 +94,15 @@ pub const StackAllocator = struct {
         const buf = self.buffer orelse return 0;
         return buf.len;
     }
+
+    /// Check if a pointer is currently allocated by this allocator.
+    pub fn isAllocated(self: *const StackAllocator, ptr: *const anyopaque) bool {
+        const buf = self.buffer orelse return false;
+        const ptr_addr = @intFromPtr(ptr);
+        const buf_start = @intFromPtr(buf.ptr);
+        const buf_end = buf_start + self.end_index;
+        return ptr_addr >= buf_start and ptr_addr < buf_end;
+    }
 };
 
 pub fn alloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, _: usize) ?[*]u8 {
