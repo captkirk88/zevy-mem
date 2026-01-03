@@ -1,3 +1,0 @@
-### What to do...
-
-- [ ] Create common interface that has bytesUsed() and endIndex() to make ScopeMarker more generic
