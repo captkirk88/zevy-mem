@@ -24,7 +24,7 @@ pub const SafeAllocator = struct {
     ///
     /// - `backing`: The underlying allocator to wrap
     /// - `arena`: Allocator for internal data structures (like the hashmap)
-    pub fn init(backing: Allocator, arena: std.mem.Allocator) !SafeAllocator {
+    pub fn init(backing: Allocator, arena: std.mem.Allocator) SafeAllocator {
         return SafeAllocator{
             .inner = backing,
             .allocations = std.AutoHashMap(usize, AllocationInfo).init(arena),
@@ -146,7 +146,7 @@ test "SafeAllocator prevents double free" {
     defer arena.deinit();
     const backing_allocator = arena.allocator();
 
-    var safe = try SafeAllocator.init(backing_allocator, std.testing.allocator);
+    var safe = SafeAllocator.init(backing_allocator, std.testing.allocator);
     defer safe.deinit() catch {}; // ignore for test
     const allocator = safe.allocator();
 
@@ -161,7 +161,7 @@ test "SafeAllocator detects leaks" {
     defer arena.deinit();
     const backing_allocator = arena.allocator();
 
-    var safe = try SafeAllocator.init(backing_allocator, std.testing.allocator);
+    var safe = SafeAllocator.init(backing_allocator, std.testing.allocator);
     safe.panic_on_leak = false;
     const allocator = safe.allocator();
 
@@ -179,7 +179,7 @@ test "SafeAllocator will panic on leak" {
     const backing_allocator = arena.allocator();
 
     var safe = try std.testing.allocator.create(SafeAllocator);
-    safe.* = try SafeAllocator.init(backing_allocator, std.testing.allocator);
+    safe.* = SafeAllocator.init(backing_allocator, std.testing.allocator);
     defer std.testing.allocator.destroy(safe);
     // safe.panic_on_leak is true by default in debug mode
     safe.panic_on_leak = false;

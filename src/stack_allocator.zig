@@ -10,9 +10,11 @@ pub const StackAllocator = struct {
 
     /// Initialize with no buffer. Must call `setBuffer` or `growBuffer` before allocating.
     pub fn init(comptime size: usize) StackAllocator {
-        var buffer: [size]u8 = undefined;
-        return .{
-            .buffer = buffer[0..size],
+        const S = struct {
+            var buf: [size]u8 = undefined;
+        };
+        return StackAllocator{
+            .buffer = S.buf[0..],
             .end_index = 0,
         };
     }

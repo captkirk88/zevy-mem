@@ -280,6 +280,8 @@ const TB = 1024 * GB;
 const PB = 1024 * TB;
 
 /// Human-readable byte size formatting
+///
+/// For formatting use the `{f}` specifier.
 pub const ByteSize = struct {
     bytes: usize,
 
@@ -310,6 +312,7 @@ pub const ByteSize = struct {
     }
 };
 
+/// Create a `ByteSize` from a raw byte count
 pub fn byteSize(bytes: usize) ByteSize {
     return ByteSize{ .bytes = bytes };
 }

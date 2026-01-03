@@ -1,67 +1,79 @@
 //! zevy-mem: Memory allocators for Zig with no heap dependencies.
 const std = @import("std");
 const builtin = @import("builtin");
+const reflect = @import("zevy_reflect");
+const mem = @import("utils/root.zig");
 
-pub const StackAllocator = @import("stack_allocator.zig").StackAllocator;
-pub const DebugAllocator = @import("debug_allocator.zig").DebugAllocator;
-pub const CountingAllocator = @import("counting_allocator.zig").CountingAllocator;
-pub const PoolAllocator = @import("pool_allocator.zig").PoolAllocator;
-pub const ScopedAllocator = @import("scoped_allocator.zig").ScopedAllocator;
-pub const NestedScope = @import("scoped_allocator.zig").NestedScope;
-pub const CautiousAllocator = @import("cautious_allocator.zig").CautiousAllocator;
-pub const SafeAllocator = @import("safe_allocator.zig").SafeAllocator;
-pub const GuardedAllocator = @import("guarded_allocator.zig").GuardedAllocator;
-pub const MmapAllocator = @import("mmap_allocator.zig").MmapAllocator;
+pub const allocators = struct {
+    /// A global StackAllocator instance for general use
+    ///
+    /// Size: 10 MB
+    pub const stack_allocator = StackAllocator.init(10 * 1024 * 1024); // 10 MiB stack allocator
+
+    const cautiousWarnFn = struct {
+        fn warn(projected: usize, hard_limit: usize) void {
+            std.debug.print("CautiousAllocator: soft memory limit reached ({f}/{f})\n", .{ mem.byteSize(projected), mem.byteSize(hard_limit) });
+        }
+    }.warn;
+    /// A global CautiousAllocator instance for general use
+    ///
+    /// Soft limit: 20 MB
+    ///
+    /// Hard limit: 30 MB
+    ///
+    /// Abort on soft limit: false
+    pub const cautious_allocator = CautiousAllocator.init(std.heap.page_allocator, 20 * 1024 * 1024, 30 * 1024 * 1024, false, cautiousWarnFn);
+
+    /// A global CountingAllocator instance for general use
+    pub const counting_allocator = CountingAllocator.init(std.heap.page_allocator);
+
+    pub const guarded_allocator = GuardedAllocator.init(std.heap.page_allocator, std.heap.c_allocator, 1);
+
+    pub const safe_allocator = SafeAllocator.init(std.heap.page_allocator, std.heap.page_allocator);
+
+    /// Utility function to create a TypeFilterAllocator with the given types.
+    pub fn typeFilter(comptime types: []const type, specific: std.mem.Allocator, fallback: std.mem.Allocator) allocators.TypeFilterAllocator(types) {
+        return allocators.TypeFilterAllocator(types).init(specific, fallback);
+    }
+
+    pub const StackAllocator = @import("stack_allocator.zig").StackAllocator;
+    pub const DebugAllocator = @import("debug_allocator.zig").DebugAllocator;
+    pub const CountingAllocator = @import("counting_allocator.zig").CountingAllocator;
+    pub const PoolAllocator = @import("pool_allocator.zig").PoolAllocator;
+    pub const ScopedAllocator = @import("scoped_allocator.zig").ScopedAllocator;
+    pub const NestedScope = @import("scoped_allocator.zig").NestedScope;
+    pub const CautiousAllocator = @import("cautious_allocator.zig").CautiousAllocator;
+    pub const SafeAllocator = @import("safe_allocator.zig").SafeAllocator;
+    pub const GuardedAllocator = @import("guarded_allocator.zig").GuardedAllocator;
+    pub const MmapAllocator = @import("mmap_allocator.zig").MmapAllocator;
+    pub const TypeFilterAllocator = @import("type_filter_allocator.zig").TypeFilterAllocator;
+};
 pub const mmap = @import("platform_mmap.zig");
 
 pub const utils = @import("utils/root.zig");
 
 pub const Mutex = @import("mutex.zig").Mutex;
 
-// Safe Pointers
-pub const Rc = @import("pointers/rc.zig").Rc;
-pub const Arc = @import("pointers/arc.zig").Arc;
+pub const pointers = struct {
+    pub const Rc = @import("pointers/rc.zig").Rc;
+    pub const Arc = @import("pointers/arc.zig").Arc;
 
-pub fn initArcWithMutex(allocator: std.mem.Allocator, value: anytype) !*Arc(*Mutex(@TypeOf(value))) {
-    const ValueType = @TypeOf(value);
-    const mutex_ptr = try Mutex(ValueType).init(allocator, value);
-    return Arc(*Mutex(ValueType)).init(allocator, mutex_ptr);
-}
+    pub fn initArcWithMutex(allocator: std.mem.Allocator, value: anytype) !*Arc(*Mutex(@TypeOf(value))) {
+        const ValueType = @TypeOf(value);
+        const mutex_ptr = try Mutex(ValueType).init(allocator, value);
+        return Arc(*Mutex(ValueType)).init(allocator, mutex_ptr);
+    }
+};
 
 pub fn toThreadSafe(allocator: anytype) std.heap.ThreadSafeAllocator {
     const allocator_type = @TypeOf(allocator);
     if (allocator_type == std.mem.Allocator) {
         return std.heap.ThreadSafeAllocator{ .child_allocator = allocator };
-    } else if (allocator_type == *StackAllocator or allocator_type == *const StackAllocator) {
-        const sa: *StackAllocator = @ptrCast(@constCast(allocator));
-        return std.heap.ThreadSafeAllocator{
-            .child_allocator = sa.allocator(),
-        };
-    } else if (allocator_type == *DebugAllocator or allocator_type == *const DebugAllocator) {
-        const da: *DebugAllocator = @ptrCast(@constCast(allocator));
-        return std.heap.ThreadSafeAllocator{
-            .child_allocator = da.allocator(),
-        };
-    } else if (allocator_type == *CountingAllocator or allocator_type == *const CountingAllocator) {
-        const ca: *CountingAllocator = @ptrCast(@constCast(allocator));
-        return std.heap.ThreadSafeAllocator{
-            .child_allocator = ca.allocator(),
-        };
-    } else if (allocator_type == *CautiousAllocator or allocator_type == *const CautiousAllocator) {
-        const ca: *CautiousAllocator = @ptrCast(@constCast(allocator));
-        return std.heap.ThreadSafeAllocator{
-            .child_allocator = ca.allocator(),
-        };
-    } else if (allocator_type == *SafeAllocator or allocator_type == *const SafeAllocator) {
-        const sa: *SafeAllocator = @ptrCast(@constCast(allocator));
-        return std.heap.ThreadSafeAllocator{
-            .child_allocator = sa.allocator(),
-        };
-    } else if (allocator_type == *GuardedAllocator or allocator_type == *const GuardedAllocator) {
-        const ga: *GuardedAllocator = @ptrCast(@constCast(allocator));
-        return std.heap.ThreadSafeAllocator{
-            .child_allocator = ga.allocator(),
-        };
+    } else {
+        if (reflect.hasFunc(allocator_type, "allocator")) {
+            const child_alloc = @constCast(allocator).allocator();
+            return std.heap.ThreadSafeAllocator{ .child_allocator = child_alloc };
+        }
     }
     @compileError("Unsupported allocator type: " ++ @typeName(allocator_type));
 }
@@ -71,15 +83,18 @@ test {
 }
 
 test "toThreadSafe works with various allocator types" {
-    const sa = StackAllocator.init(1024);
+    var sa = allocators.StackAllocator.init(1024);
+    defer sa.reset();
     const tsa1 = toThreadSafe(&sa);
     _ = tsa1;
 
-    const da = DebugAllocator.init(std.heap.page_allocator);
+    var da = allocators.DebugAllocator.init(std.heap.page_allocator);
+    defer da.deinit();
     const tsa2 = toThreadSafe(&da);
     _ = tsa2;
 
-    const ca = CountingAllocator.init(std.heap.page_allocator);
+    var ca = allocators.CountingAllocator.init(std.heap.page_allocator);
+    defer ca.reset();
     const tsa3 = toThreadSafe(&ca);
     _ = tsa3;
 }
@@ -89,11 +104,11 @@ test "initArcWithMutex - multithreaded mutation" {
     const allocator = testing.allocator;
 
     const init_value: i32 = 0;
-    const arc = try initArcWithMutex(allocator, init_value);
+    const arc = try pointers.initArcWithMutex(allocator, init_value);
     defer arc.deinit();
 
     const ThreadContext = struct {
-        arc_ptr: *Arc(*Mutex(i32)),
+        arc_ptr: *pointers.Arc(*Mutex(i32)),
         iterations: usize,
     };
 

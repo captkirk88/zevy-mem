@@ -6,8 +6,9 @@ const Allocator = std.mem.Allocator;
 /// Atomic reference counted pointer.
 ///
 /// Not thread-safe for mutation of the contained data; only the reference counting is atomic.
+/// This is purposefully designed this way to give control to the user for how to handle data access
 ///
-/// Use `Arc(*Mutex(T))` for thread-safe data access.
+/// Use `Arc(*Mutex(T))` or `zevy_mem.initArcWithMutex()` for thread-safe data access.
 pub fn Arc(comptime T: type) type {
     return opaque {
         const Self = @This();
@@ -25,12 +26,20 @@ pub fn Arc(comptime T: type) type {
                 switch (comptime reflect.getReflectInfo(T)) {
                     .type => |ti| {
                         if (ti.hasFunc("deinit")) {
-                            self.value.deinit();
+                            if (reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
+                                self.value.deinit(self.allocator);
+                            } else {
+                                self.value.deinit();
+                            }
                         }
                     },
                     .raw => |ty| {
                         if (reflect.hasFunc(ty, "deinit")) {
-                            self.value.deinit();
+                            if (reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
+                                self.value.deinit(self.allocator);
+                            } else {
+                                self.value.deinit();
+                            }
                         }
                     },
                     else => {},

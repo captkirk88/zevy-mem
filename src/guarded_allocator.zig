@@ -35,7 +35,7 @@ pub const GuardedAllocator = struct {
     ///  Accessing even 1 byte beyond the allocated buffer will hit a guard page and segfault.
     ///  More guard pages provide a larger safety zone but increase memory overhead.
     ///  Default is typically 1, as it's usually sufficient for detection.
-    pub fn init(backing: Allocator, arena: std.mem.Allocator, guard_pages: usize) !GuardedAllocator {
+    pub fn init(backing: Allocator, arena: std.mem.Allocator, guard_pages: usize) GuardedAllocator {
         return GuardedAllocator{
             .inner = backing,
             .allocations = std.AutoHashMap(usize, AllocationInfo).init(arena),
@@ -178,7 +178,7 @@ fn freeGuardedRegion(ptr: [*]u8, size: usize) void {
 }
 
 test "GuardedAllocator resize supported for shrinking" {
-    var guarded = try GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
     defer guarded.deinit();
     const allocator = guarded.allocator();
 
@@ -195,7 +195,7 @@ test "GuardedAllocator resize supported for shrinking" {
 }
 
 test "GuardedAllocator remap not supported" {
-    var guarded = try GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
     defer guarded.deinit();
     const allocator = guarded.allocator();
 
@@ -207,7 +207,7 @@ test "GuardedAllocator remap not supported" {
 }
 
 test "GuardedAllocator allocation tracking" {
-    var guarded = try GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
     defer guarded.deinit();
     const allocator = guarded.allocator();
 
@@ -231,7 +231,7 @@ test "GuardedAllocator allocation tracking" {
 }
 
 test "GuardedAllocator guard pages cause segfault on overflow" {
-    var guarded = try GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(std.heap.page_allocator, std.testing.allocator, 1);
     defer guarded.deinit();
     const allocator = guarded.allocator();
 
@@ -269,7 +269,7 @@ test "GuardedAllocator vs arena_allocator (contiguous)" {
     std.debug.print("Arena allocator did not segfault, buf2[0] = {}\n", .{buf2[0]});
 
     // With GuardedAllocator, overflow hits guard page, segfault
-    var guarded = try GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
     defer guarded.deinit();
     const guarded_alloc = guarded.allocator();
     var gbuf = try guarded_alloc.alloc(u8, 4096);
@@ -296,7 +296,7 @@ test "GuardedAllocator vs fixed buffer allocator" {
 
     versus.reset();
 
-    var guarded = try GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
     defer guarded.deinit();
     const guarded_alloc = guarded.allocator();
     var gbuf = try guarded_alloc.alloc(u8, 4096);
@@ -320,7 +320,7 @@ test "GuardedAllocator vs smp allocator" {
     overflow_ptr[0] = 42; // Corrupts buf2, no segfault
     std.debug.print("SMP allocator did not segfault, buf2[0] = {}\n", .{buf2[0]});
 
-    var guarded = try GuardedAllocator.init(versus, std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(versus, std.testing.allocator, 1);
     defer guarded.deinit();
     const guarded_alloc = guarded.allocator();
     var gbuf = try guarded_alloc.alloc(u8, 4096);
@@ -337,7 +337,7 @@ test "GuardedAllocator vs smp allocator" {
 test "GuardedAllocator std.heap.testAllocator" {
     var versus = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer versus.deinit();
-    var guarded = try GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
     defer guarded.deinit();
 
     try std.heap.testAllocator(guarded.allocator());
@@ -346,7 +346,7 @@ test "GuardedAllocator std.heap.testAllocator" {
 test "GuardedAllocator std.heap.testAllocatorLargeAlignment" {
     var versus = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer versus.deinit();
-    var guarded = try GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
     defer guarded.deinit();
 
     try std.heap.testAllocatorLargeAlignment(guarded.allocator());
@@ -355,7 +355,7 @@ test "GuardedAllocator std.heap.testAllocatorLargeAlignment" {
 test "GuardedAllocator std.heap.testAllocatorAligned" {
     var versus = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer versus.deinit();
-    var guarded = try GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
     defer guarded.deinit();
 
     try std.heap.testAllocatorAligned(guarded.allocator());
@@ -364,7 +364,7 @@ test "GuardedAllocator std.heap.testAllocatorAligned" {
 test "GuardedAllocator std.heap.testAllocatorAlignedShrink" {
     var versus = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer versus.deinit();
-    var guarded = try GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
+    var guarded = GuardedAllocator.init(versus.allocator(), std.testing.allocator, 1);
     defer guarded.deinit();
 
     try std.heap.testAllocatorAlignedShrink(guarded.allocator());

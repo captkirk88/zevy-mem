@@ -83,16 +83,16 @@ pub const MmapAllocator = struct {
         }
     };
 
-    pub fn init(options: InitOptions) !MmapAllocator {
+    pub fn init(options: InitOptions) MmapAllocator {
         const page_size = platform.page_size;
         const requested_size = std.mem.alignForward(usize, options.size, page_size);
-        if (requested_size < page_size * 2) return error.FileTooSmall;
+        if (requested_size < page_size * 2) std.debug.panic("File too small for MmapAllocator: requested {d}, minimum {d}", .{ requested_size, page_size * 2 });
 
-        const handle = try platform.openFile(options.path, true);
+        const handle = platform.openFile(options.path, true) catch std.debug.panic("Failed to open file: {s}", .{options.path});
         var cleanup_close_handle = true;
         errdefer if (cleanup_close_handle) platform.closeFile(handle);
 
-        const file_stat = try platform.fileStats(handle);
+        const file_stat = platform.fileStats(handle) catch std.debug.panic("Failed to get file stats: {s}", .{options.path});
         const existing_size = file_stat.size;
 
         var mapped_size = requested_size;
@@ -102,10 +102,10 @@ pub const MmapAllocator = struct {
         }
 
         if (!options.preserve or existing_size < mapped_size) {
-            try platform.truncateFile(handle, mapped_size);
+            platform.truncateFile(handle, mapped_size) catch std.debug.panic("Failed to truncate file: {s} to size {d}", .{ options.path, mapped_size });
         }
 
-        const mapped = try platform.mapFile(handle, mapped_size);
+        const mapped = platform.mapFile(handle, mapped_size) catch std.debug.panic("Failed to map file: {s}", .{options.path});
         var cleanup_unmap = true;
         errdefer if (cleanup_unmap) platform.unmapFile(mapped);
 
@@ -120,7 +120,7 @@ pub const MmapAllocator = struct {
         };
 
         if (!options.preserve or !self.tryLoadExisting(page_size)) {
-            try self.initializeLayout(page_size);
+            self.initializeLayout(page_size) catch std.debug.panic("Failed to initialize layout: {s}", .{options.path});
         }
 
         platform.syncFile(self.file_handle);
@@ -442,7 +442,7 @@ test "MmapAllocator can allocate and free" {
     const path: [:0]const u8 = "mmap_allocator_test.bin";
     defer std.fs.cwd().deleteFileZ(path) catch {};
 
-    var mmap_alloc = try MmapAllocator.init(.{ .path = path, .size = 64 * 1024 });
+    var mmap_alloc = MmapAllocator.init(.{ .path = path, .size = 64 * 1024 });
     defer mmap_alloc.deinit();
 
     const allocator = mmap_alloc.allocator();
@@ -484,7 +484,7 @@ test "MmapAllocator alignment and resize behavior" {
     const path: [:0]const u8 = "mmap_allocator_align.bin";
     defer std.fs.cwd().deleteFileZ(path) catch {};
 
-    var mmap_alloc = try MmapAllocator.init(.withPages(path, 4));
+    var mmap_alloc = MmapAllocator.init(.withPages(path, 4));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -512,7 +512,7 @@ test "MmapAllocator reuses freed space" {
     const path: [:0]const u8 = "mmap_allocator_reuse.bin";
     defer std.fs.cwd().deleteFileZ(path) catch {};
 
-    var mmap_alloc = try MmapAllocator.init(.withPages(path, 4));
+    var mmap_alloc = MmapAllocator.init(.withPages(path, 4));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -533,7 +533,7 @@ test "MmapAllocator preserve keeps data" {
 
     var first_opts = MmapAllocator.InitOptions.withPages(path, 4);
     first_opts.preserve = false;
-    var first = try MmapAllocator.init(first_opts);
+    var first = MmapAllocator.init(first_opts);
     const alloc1 = first.allocator();
 
     const buf = try alloc1.alloc(u8, 32);
@@ -544,7 +544,7 @@ test "MmapAllocator preserve keeps data" {
 
     var second_opts = MmapAllocator.InitOptions.withPages(path, 4);
     second_opts.preserve = true;
-    var second = try MmapAllocator.init(second_opts);
+    var second = MmapAllocator.init(second_opts);
     defer second.deinit();
 
     const restored_ptr = second.ptrFromOffset(rel_off);
@@ -560,7 +560,7 @@ test "MmapAllocator remap grows and copies data" {
     const path: [:0]const u8 = "mmap_allocator_remap_grow.bin";
     defer std.fs.cwd().deleteFileZ(path) catch {};
 
-    var mmap_alloc = try MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 8));
+    var mmap_alloc = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 8));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -578,7 +578,7 @@ test "MmapAllocator remap to zero frees allocation" {
     const path: [:0]const u8 = "mmap_allocator_remap_zero.bin";
     defer std.fs.cwd().deleteFileZ(path) catch {};
 
-    var mmap_alloc = try MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 4));
+    var mmap_alloc = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 4));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -592,7 +592,7 @@ test "MmapAllocator remap to zero frees allocation" {
 test "MmapAllocator multi-write preserve file" {
     const path: [:0]const u8 = "mmap_allocator_multi_write.bin";
 
-    var first = try MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 8));
+    var first = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 8));
     const allocator = first.allocator();
 
     const chunk1 = try allocator.alloc(u8, 64);
@@ -616,7 +616,7 @@ test "MmapAllocator multi-write preserve file" {
 
     var second_opts = MmapAllocator.InitOptions.withPages(path, 8);
     second_opts.preserve = true;
-    var second = try MmapAllocator.init(second_opts);
+    var second = MmapAllocator.init(second_opts);
     defer second.deinit();
 
     const restored1 = second.ptrFromOffset(off1)[0..chunk1.len];
@@ -649,7 +649,7 @@ test "MmapAllocator runtime-vs-page allocator usage" {
     std.heap.page_allocator.free(runtime_chunk);
 
     const before_mmap = try memory_utils.getMemoryInfo();
-    var mmap_alloc = try MmapAllocator.init(.{ .path = path, .size = runtime_size });
+    var mmap_alloc = MmapAllocator.init(.{ .path = path, .size = runtime_size });
     defer mmap_alloc.deinit();
     const mmap_chunk = try mmap_alloc.allocator().alloc(u8, 1);
     mmap_chunk[0] = 0xBB;

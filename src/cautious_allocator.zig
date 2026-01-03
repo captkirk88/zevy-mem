@@ -1,13 +1,13 @@
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
+const mem = @import("utils/root.zig");
 
 /// CautiousAllocator
 /// A wrapper around any `std.mem.Allocator` that tracks current bytes used
 /// and enforces a soft and hard limit. The allocator will refuse allocations
 /// that would exceed the hard limit. When the soft limit is crossed it will
 /// optionally abort allocations (controlled via `abort_on_soft`) and will
-/// print a single warning the first time the soft limit is approached.
+/// invoke the warnFn the first time the soft limit is approached.
 pub const CautiousAllocator = struct {
     inner: Allocator,
     soft_limit: usize,
@@ -15,6 +15,7 @@ pub const CautiousAllocator = struct {
     bytes_used: usize,
     abort_on_soft: bool,
     warned: bool,
+    warnFn: *const fn (projected: usize, hard_limit: usize) void,
 
     /// Initialize a CautiousAllocator
     ///
@@ -22,7 +23,8 @@ pub const CautiousAllocator = struct {
     /// - `soft_limit`: The soft limit in bytes
     /// - `hard_limit`: The hard limit in bytes
     /// - `abort_on_soft`: If true, allocations that exceed the soft limit will be aborted
-    pub fn init(backing: Allocator, soft_limit: usize, hard_limit: usize, abort_on_soft: bool) CautiousAllocator {
+    /// - `warnFn`: Function to call when soft limit is first exceeded, takes projected bytes and hard limit
+    pub fn init(backing: Allocator, soft_limit: usize, hard_limit: usize, abort_on_soft: bool, warnFn: *const fn (projected: usize, hard_limit: usize) void) CautiousAllocator {
         return CautiousAllocator{
             .inner = backing,
             .soft_limit = soft_limit,
@@ -30,6 +32,7 @@ pub const CautiousAllocator = struct {
             .bytes_used = 0,
             .abort_on_soft = abort_on_soft,
             .warned = false,
+            .warnFn = warnFn,
         };
     }
 
@@ -49,6 +52,10 @@ pub const CautiousAllocator = struct {
         return self.bytes_used;
     }
 
+    pub fn getLimits(self: *CautiousAllocator) struct { soft: usize, hard: usize } {
+        return .{ .soft = self.soft_limit, .hard = self.hard_limit };
+    }
+
     fn willAllow(self: *CautiousAllocator, additional: usize) bool {
         // check hard limit first
         const projected = self.bytes_used + additional;
@@ -56,7 +63,7 @@ pub const CautiousAllocator = struct {
 
         if (projected > self.soft_limit) {
             if (!self.warned) {
-                std.debug.print("CautiousAllocator: approaching soft memory limit ({d}/{d})\n", .{ projected, self.hard_limit });
+                self.warnFn(projected, self.hard_limit);
                 self.warned = true;
             }
             if (self.abort_on_soft) return false;
@@ -143,7 +150,9 @@ fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usiz
 
 test "CautiousAllocator enforces limits" {
     const backing_allocator = std.testing.allocator;
-    var cautious = CautiousAllocator.init(backing_allocator, 1024, 2048, false);
+    var cautious = CautiousAllocator.init(backing_allocator, 1024, 2048, false, struct {
+        fn warn(_: usize, _: usize) void {}
+    }.warn);
     const allocator = cautious.allocator();
 
     // Allocate within soft limit

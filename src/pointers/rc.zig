@@ -20,12 +20,20 @@ pub fn Rc(comptime T: type) type {
                 switch (comptime reflect.getReflectInfo(T)) {
                     .type => |ti| {
                         if (ti.hasFunc("deinit")) {
-                            self.value.deinit();
+                            if (reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
+                                self.value.deinit(self.allocator);
+                            } else {
+                                self.value.deinit();
+                            }
                         }
                     },
                     .raw => |ty| {
                         if (reflect.hasFunc(ty, "deinit")) {
-                            self.value.deinit();
+                            if (reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
+                                self.value.deinit(self.allocator);
+                            } else {
+                                self.value.deinit();
+                            }
                         }
                     },
                     else => {},

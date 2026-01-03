@@ -32,6 +32,7 @@ pub const CountingAllocator = struct {
         return self.bytes_allocated;
     }
 
+    /// Clears the allocation counters.
     pub fn reset(self: *CountingAllocator) void {
         self.bytes_allocated = 0;
         self.allocs_count = 0;

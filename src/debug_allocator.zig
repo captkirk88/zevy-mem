@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const util = @import("utils/root.zig");
 
+pub const debug_allocator = DebugAllocator.init(std.heap.page_allocator);
+
 /// Debug wrapper around any std.mem.Allocator that tracks allocations for leak detection.
 /// Uses dynamic allocation for tracking (allocates from the backing allocator).
 pub const DebugAllocator = struct {
