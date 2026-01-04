@@ -10,28 +10,7 @@ pub const allocators = struct {
     /// A global StackAllocator instance for general use
     ///
     /// Size: 10 MB
-    pub const stack_allocator = StackAllocator.init(10 * 1024 * 1024); // 10 MiB stack allocator
-
-    const cautiousWarnFn = struct {
-        fn warn(projected: usize, hard_limit: usize) void {
-            std.debug.print("CautiousAllocator: soft memory limit reached ({f}/{f})\n", .{ mem.byteSize(projected), mem.byteSize(hard_limit) });
-        }
-    }.warn;
-    /// A global CautiousAllocator instance for general use
-    ///
-    /// Soft limit: 20 MB
-    ///
-    /// Hard limit: 30 MB
-    ///
-    /// Abort on soft limit: false
-    pub const cautious_allocator = CautiousAllocator.init(std.heap.page_allocator, 20 * 1024 * 1024, 30 * 1024 * 1024, false, cautiousWarnFn);
-
-    /// A global CountingAllocator instance for general use
-    pub const counting_allocator = CountingAllocator.init(std.heap.page_allocator);
-
-    pub const guarded_allocator = GuardedAllocator.init(std.heap.page_allocator, std.heap.c_allocator, 1);
-
-    pub const safe_allocator = SafeAllocator.init(std.heap.page_allocator, std.heap.page_allocator);
+    pub const stack_allocator = StackAllocator.init(10 * 1024 * 1024).allocator(); // 10 MiB stack allocator
 
     /// Utility function to create a TypeFilterAllocator with the given types.
     pub fn typeFilter(comptime types: []const type, specific: std.mem.Allocator, fallback: std.mem.Allocator) allocators.TypeFilterAllocator(types) {
@@ -67,14 +46,16 @@ pub const pointers = struct {
     }
 };
 
-pub fn toThreadSafe(allocator: anytype) std.heap.ThreadSafeAllocator {
+pub fn toThreadSafe(allocator: anytype) std.mem.Allocator {
     const allocator_type = @TypeOf(allocator);
     if (allocator_type == std.mem.Allocator) {
-        return std.heap.ThreadSafeAllocator{ .child_allocator = allocator };
+        var thread_safe_allocator = std.heap.ThreadSafeAllocator{ .child_allocator = allocator };
+        return thread_safe_allocator.allocator();
     } else {
-        if (reflect.hasFunc(allocator_type, "allocator")) {
+        if (reflect.hasFuncWithArgs(allocator_type, "allocator", &[_]type{})) {
             const child_alloc = @constCast(allocator).allocator();
-            return std.heap.ThreadSafeAllocator{ .child_allocator = child_alloc };
+            var thread_safe_allocator = std.heap.ThreadSafeAllocator{ .child_allocator = child_alloc };
+            return thread_safe_allocator.allocator();
         }
     }
     @compileError("Unsupported allocator type: " ++ @typeName(allocator_type));

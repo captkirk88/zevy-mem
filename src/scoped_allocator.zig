@@ -16,7 +16,7 @@ pub const ScopedAllocator = struct {
         return .{
             .inner = base_allocator,
             .saved_index = base_allocator.bytesUsed(),
-            .saved_buffer_ptr = if (base_allocator.buffer) |buf| buf.ptr else null,
+            .saved_buffer_ptr = base_allocator.buffer.ptr,
         };
     }
 
@@ -26,7 +26,7 @@ pub const ScopedAllocator = struct {
     /// Returns an error if the underlying buffer has changed.
     pub fn end(self: *ScopedAllocator) error{BufferChanged}!void {
         // Validate buffer hasn't changed
-        const current_ptr: ?[*]u8 = if (self.inner.buffer) |buf| buf.ptr else null;
+        const current_ptr: ?[*]u8 = self.inner.buffer.ptr;
 
         if (self.saved_buffer_ptr != current_ptr) {
             // Buffer was changed during scope - this is a misuse
@@ -48,7 +48,7 @@ pub const ScopedAllocator = struct {
 
     /// Check if the buffer has changed since scope began.
     pub fn bufferChanged(self: *const ScopedAllocator) bool {
-        const current_ptr: ?[*]u8 = if (self.inner.buffer) |buf| buf.ptr else null;
+        const current_ptr: ?[*]u8 = self.inner.buffer.ptr;
         return self.saved_buffer_ptr != current_ptr;
     }
 };
@@ -110,7 +110,7 @@ pub fn NestedScope(comptime max_depth: usize) type {
             }
             self.stack[self.depth] = .{
                 .index = self.inner.bytesUsed(),
-                .buffer_ptr = if (self.inner.buffer) |buf| buf.ptr else null,
+                .buffer_ptr = self.inner.buffer.ptr,
             };
             self.depth += 1;
         }
@@ -124,7 +124,7 @@ pub fn NestedScope(comptime max_depth: usize) type {
             self.depth -= 1;
 
             const saved = self.stack[self.depth];
-            const current_ptr: ?[*]u8 = if (self.inner.buffer) |buf| buf.ptr else null;
+            const current_ptr: [*]u8 = self.inner.buffer.ptr;
 
             if (saved.buffer_ptr != current_ptr) {
                 return error.BufferChanged;
@@ -157,7 +157,7 @@ pub fn NestedScope(comptime max_depth: usize) type {
                 return false;
             }
             const saved = self.stack[self.depth - 1];
-            const current_ptr: ?[*]u8 = if (self.inner.buffer) |buf| buf.ptr else null;
+            const current_ptr: ?[*]u8 = self.inner.buffer.ptr;
             return saved.buffer_ptr != current_ptr;
         }
     };
@@ -309,7 +309,7 @@ test "end detects buffer change" {
     _ = try scope.allocator().alloc(u8, 20);
 
     // Change buffer during scope (BAD!)
-    try stack.growBuffer(&large_buffer);
+    try stack.grow(&large_buffer);
 
     // Should detect the change
     try std.testing.expect(scope.bufferChanged());
@@ -327,7 +327,7 @@ test "nested scope detects buffer change" {
     _ = try nested.allocator().alloc(u8, 20);
 
     // Change buffer during scope
-    try stack.growBuffer(&large_buffer);
+    try stack.grow(&large_buffer);
 
     try std.testing.expect(nested.bufferChanged());
     try std.testing.expectError(error.BufferChanged, nested.pop());

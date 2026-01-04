@@ -4,11 +4,11 @@ const Allocator = std.mem.Allocator;
 /// A stack-based allocator that uses a fixed buffer (no heap allocations).
 pub const StackAllocator = struct {
     /// Allocated buffer
-    buffer: ?[]u8,
+    buffer: []u8,
     /// Index of the end of used memory in the buffer
     end_index: usize,
 
-    /// Initialize with no buffer. Must call `setBuffer` or `growBuffer` before allocating.
+    /// Initialize with no buffer. Must call `setBuffer` or `grow` before allocating.
     pub fn init(comptime size: usize) StackAllocator {
         const S = struct {
             var buf: [size]u8 = undefined;
@@ -27,31 +27,21 @@ pub const StackAllocator = struct {
         };
     }
 
-    /// Set or replace the buffer. Copies existing data if growing.
-    /// New buffer must be at least as large as current `end_index`.
-    pub fn growBuffer(self: *StackAllocator, new_buffer: []u8) error{BufferTooSmall}!void {
-        if (new_buffer.len < self.end_index) {
+    /// Grow the internal buffer to a new size.
+    pub fn grow(self: *StackAllocator, buffer: []u8) error{BufferTooSmall}!void {
+        if (buffer.len < self.end_index) {
             return error.BufferTooSmall;
         }
 
-        if (self.buffer) |old_buffer| {
-            if (self.end_index > 0) {
-                @memcpy(new_buffer[0..self.end_index], old_buffer[0..self.end_index]);
-            }
-        }
+        // Copy existing data
+        @memmove(buffer[0..self.end_index], self.buffer[0..self.end_index]);
 
-        self.buffer = new_buffer;
-    }
-
-    /// Set a new buffer, resetting the allocator state.
-    pub fn setBuffer(self: *StackAllocator, buffer: []u8) void {
         self.buffer = buffer;
-        self.end_index = 0;
     }
 
-    pub fn allocator(self: *StackAllocator) Allocator {
+    pub fn allocator(self: *const StackAllocator) Allocator {
         return .{
-            .ptr = self,
+            .ptr = @ptrCast(@alignCast(@constCast(self))),
             .vtable = &.{
                 .alloc = alloc,
                 .resize = resize,
@@ -85,21 +75,18 @@ pub const StackAllocator = struct {
 
     /// Returns the number of bytes remaining.
     pub fn bytesRemaining(self: *const StackAllocator) usize {
-        const buf = self.buffer orelse return 0;
-        return buf.len - self.end_index;
+        return self.buffer.len - self.end_index;
     }
 
     /// Returns the total buffer capacity.
     pub fn capacity(self: *const StackAllocator) usize {
-        const buf = self.buffer orelse return 0;
-        return buf.len;
+        return self.buffer.len;
     }
 
     /// Check if a pointer is currently allocated by this allocator.
     pub fn isAllocated(self: *const StackAllocator, ptr: *const anyopaque) bool {
-        const buf = self.buffer orelse return false;
         const ptr_addr = @intFromPtr(ptr);
-        const buf_start = @intFromPtr(buf.ptr);
+        const buf_start = @intFromPtr(self.buffer.ptr);
         const buf_end = buf_start + self.end_index;
         return ptr_addr >= buf_start and ptr_addr < buf_end;
     }
@@ -107,24 +94,22 @@ pub const StackAllocator = struct {
 
 pub fn alloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, _: usize) ?[*]u8 {
     const self: *StackAllocator = @ptrCast(@alignCast(ctx));
-    const buf = self.buffer orelse return null;
 
     const aligned_index = ptr_align.forward(self.end_index);
     const new_end = aligned_index + len;
 
-    if (new_end > buf.len) {
+    if (new_end > self.buffer.len) {
         return null; // Out of memory
     }
 
     self.end_index = new_end;
-    return buf.ptr + aligned_index;
+    return self.buffer.ptr + aligned_index;
 }
 
 pub fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, _: usize) bool {
     const self: *StackAllocator = @ptrCast(@alignCast(ctx));
-    const backing = self.buffer orelse return false;
 
-    const buf_start = @intFromPtr(buf.ptr) - @intFromPtr(backing.ptr);
+    const buf_start = @intFromPtr(buf.ptr) - @intFromPtr(self.buffer.ptr);
     const buf_end = buf_start + buf.len;
 
     // Can only resize the most recent allocation
@@ -135,7 +120,7 @@ pub fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len:
     if (new_len > buf.len) {
         // Growing
         const new_end = buf_start + new_len;
-        if (new_end > backing.len) {
+        if (new_end > self.buffer.len) {
             return false;
         }
         self.end_index = new_end;
@@ -161,9 +146,8 @@ pub fn remap(
 
 pub fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, _: usize) void {
     const self: *StackAllocator = @ptrCast(@alignCast(ctx));
-    const backing = self.buffer orelse return;
 
-    const buf_start = @intFromPtr(buf.ptr) - @intFromPtr(backing.ptr);
+    const buf_start = @intFromPtr(buf.ptr) - @intFromPtr(self.buffer.ptr);
     const buf_end = buf_start + buf.len;
 
     // Can only free the most recent allocation (LIFO)
@@ -189,50 +173,30 @@ test "init without buffer" {
     try std.testing.expectError(error.OutOfMemory, result);
 }
 
-test "setBuffer" {
+test "grow" {
     var stack = StackAllocator.init(0);
-    var buffer: [1024]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 0), stack.capacity());
 
-    stack.setBuffer(&buffer);
-    try std.testing.expectEqual(@as(usize, 1024), stack.capacity());
+    try std.testing.expectError(error.OutOfMemory, stack.allocator().alloc(u8, 10));
 
+    var buffer: [512]u8 = undefined;
+    try stack.grow(&buffer);
+    try std.testing.expectEqual(@as(usize, 512), stack.capacity());
+
+    // Allocation should now succeed
     const alloca = stack.allocator();
-    const slice = try alloca.alloc(u8, 100);
-    try std.testing.expectEqual(@as(usize, 100), slice.len);
+    const slice = try alloca.alloc(u8, 256);
+    try std.testing.expectEqual(@as(usize, 256), slice.len);
+    try std.testing.expectEqual(@as(usize, 256), stack.bytesUsed());
 }
 
-test "growBuffer" {
-    var small_buffer: [100]u8 = undefined;
-    var large_buffer: [500]u8 = undefined;
-
-    var stack = StackAllocator.initBuffer(&small_buffer);
+test "grow buffer too small" {
+    var small: [100]u8 = undefined;
+    var stack = StackAllocator.initBuffer(&small);
     const alloca = stack.allocator();
-
-    // Allocate some data
-    const slice = try alloca.alloc(u8, 50);
-    @memset(slice, 0xAB);
-
-    // Grow buffer
-    try stack.growBuffer(&large_buffer);
-    try std.testing.expectEqual(@as(usize, 500), stack.capacity());
-    try std.testing.expectEqual(@as(usize, 50), stack.bytesUsed());
-
-    // Verify data was copied
-    try std.testing.expectEqual(@as(u8, 0xAB), large_buffer[0]);
-    try std.testing.expectEqual(@as(u8, 0xAB), large_buffer[49]);
-}
-
-test "growBuffer too small" {
-    var buffer: [100]u8 = undefined;
-    var small_buffer: [30]u8 = undefined;
-
-    var stack = StackAllocator.initBuffer(&buffer);
-    const alloca = stack.allocator();
-
-    _ = try alloca.alloc(u8, 50);
-
-    // Try to grow to smaller buffer
-    const result = stack.growBuffer(&small_buffer);
+    _ = try alloca.alloc(u8, 80);
+    var too_small: [50]u8 = undefined;
+    const result = stack.grow(&too_small);
     try std.testing.expectError(error.BufferTooSmall, result);
 }
 

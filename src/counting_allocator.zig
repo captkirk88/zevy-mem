@@ -8,9 +8,9 @@ pub const CountingAllocator = struct {
     allocs_count: usize,
 
     /// Get the underlying allocator interface.
-    pub fn allocator(self: *CountingAllocator) std.mem.Allocator {
+    pub fn allocator(self: *const CountingAllocator) std.mem.Allocator {
         return .{
-            .ptr = self,
+            .ptr = @ptrCast(@alignCast(@constCast(self))),
             .vtable = &.{
                 .alloc = alloc,
                 .resize = resize,
