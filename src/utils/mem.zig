@@ -21,16 +21,17 @@ pub fn getMemoryInfo() !MemoryInfo {
     }
 }
 
+/// TODO working on getting this to work on linux
 fn getMemoryInfoLinux() !MemoryInfo {
     // Get current usage via getrusage
     var rusage: std.os.linux.rusage = undefined;
-    std.os.linux.getrusage(std.os.linux.rusage.SELF, &rusage) catch |err| return err;
-    const current_usage = @as(usize, @intCast(rusage.maxrss)) * 1024; // ru_maxrss is in KB on Linux
+    std.os.linux.getrusage(std.os.linux.rusage.SELF, &rusage);
+    const current_usage = @as(usize, @intCast(rusage.maxrss)) * 1024; // ru_maxrss is in KB on Linux (TODO test)
 
     // Get max limit via getrlimit
     var rlim: std.os.linux.rlimit = undefined;
-    std.os.linux.getrlimit(.RLIMIT_AS, &rlim) catch |err| return err;
-    const max_limit = if (rlim.cur == std.os.linux.RLIM.INFINITY) std.math.maxInt(usize) else rlim.cur;
+    std.os.linux.getrlimit(.AS, &rlim);
+    const max_limit = @as(usize, @intCast(rlim.max));
 
     return .{ .current_usage = current_usage, .max_limit = max_limit };
 }
