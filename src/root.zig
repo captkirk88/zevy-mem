@@ -38,12 +38,6 @@ pub const Mutex = @import("mutex.zig").Mutex;
 pub const pointers = struct {
     pub const Rc = @import("pointers/rc.zig").Rc;
     pub const Arc = @import("pointers/arc.zig").Arc;
-
-    pub fn initArcWithMutex(allocator: std.mem.Allocator, value: anytype) !*Arc(*Mutex(@TypeOf(value))) {
-        const ValueType = @TypeOf(value);
-        const mutex_ptr = try Mutex(ValueType).init(allocator, value);
-        return Arc(*Mutex(ValueType)).init(allocator, mutex_ptr);
-    }
 };
 
 pub fn toThreadSafe(allocator: anytype) std.mem.Allocator {
@@ -87,7 +81,7 @@ test "initArcWithMutex - multithreaded mutation" {
     const allocator = testing.allocator;
 
     const init_value: i32 = 0;
-    const arc = try pointers.initArcWithMutex(allocator, init_value);
+    const arc = try pointers.Arc(i32).initWithMutex(allocator, init_value);
     defer arc.deinit();
 
     const ThreadContext = struct {

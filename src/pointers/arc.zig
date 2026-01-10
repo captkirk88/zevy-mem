@@ -58,6 +58,12 @@ pub fn Arc(comptime T: type) type {
             return @ptrCast(inner);
         }
 
+        /// Create a new Arc with a mutex-wrapped value for thread-safe access
+        pub fn initWithMutex(allocator: Allocator, value: T) !*Arc(*root.Mutex(T)) {
+            const mutex_ptr = try root.Mutex(T).init(allocator, value);
+            return Arc(*root.Mutex(T)).init(allocator, mutex_ptr);
+        }
+
         /// Clone the Arc, atomically incrementing the reference count
         pub fn clone(self: *Self) *Self {
             const inner: *Inner = @ptrCast(@alignCast(self));
@@ -569,11 +575,8 @@ test "Arc with Mutex - thread-safe data access" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Create the inner Mutex first
-    const inner_mutex = try root.Mutex(i32).init(allocator, 0);
-
     // Create Arc containing a pointer to the Mutex
-    const arc = try Arc(*root.Mutex(i32)).init(allocator, inner_mutex);
+    const arc = try Arc(*root.Mutex(i32)).init(allocator, try root.Mutex(i32).init(allocator, 0));
     defer arc.deinit();
 
     const ThreadContext = struct {
@@ -619,5 +622,32 @@ test "Arc with Mutex - thread-safe data access" {
         const final_count = guard.get().*;
         try testing.expectEqual(thread_count * iterations, final_count);
     }
+    try testing.expectEqual(1, arc.strongCount());
+}
+
+test "Arc initWithMutex" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const arc = try Arc(i32).initWithMutex(allocator, 42);
+    defer arc.deinit();
+
+    // Access the value through the mutex
+    {
+        const guard = arc.get().*.lock();
+        defer guard.deinit();
+        try testing.expectEqual(42, guard.get().*);
+
+        // Modify the value
+        guard.get().* = 100;
+    }
+
+    // Check the modified value
+    {
+        const guard = arc.get().*.lock();
+        defer guard.deinit();
+        try testing.expectEqual(100, guard.get().*);
+    }
+
     try testing.expectEqual(1, arc.strongCount());
 }
