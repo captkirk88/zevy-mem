@@ -8,8 +8,8 @@
 
     .dependencies = .{
         .zevy_reflect = .{
-            .url = "git+https://github.com/captkirk88/zevy-reflect#7d9870859aab8695c485c168415bd8f1c097cf3f",
-            .hash = "zevy_reflect-0.0.1-8SzYxhqFAgAc6ufS9_EcFKZxtXPy6hOEcsEwqU-Ym9-c",
+            .url = "git+https://github.com/captkirk88/zevy-reflect#9a49829950b317dbb093022683c700269f8ce65c",
+            .hash = "zevy_reflect-0.1.0-8SzYxhqFAgAEG8Hf1KyKePXm8bdamb6f6MvtOW3WUh2z",
         },
         .zevy_buildtools = .{
             .url = "git+https://github.com/captkirk88/zevy-buildtools#d8b390e55ab5ae7856a87dffa8e79dbf9666b900",
