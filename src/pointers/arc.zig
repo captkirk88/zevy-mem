@@ -1,6 +1,6 @@
 const std = @import("std");
 const reflect = @import("zevy_reflect");
-const root = @import("../root.zig");
+const mutex = @import("../mutex.zig");
 const Allocator = std.mem.Allocator;
 
 /// Atomic reference counted pointer.
@@ -59,9 +59,9 @@ pub fn Arc(comptime T: type) type {
         }
 
         /// Create a new Arc with a mutex-wrapped value for thread-safe access
-        pub fn initWithMutex(allocator: Allocator, value: T) !*Arc(*root.Mutex(T)) {
-            const mutex_ptr = try root.Mutex(T).init(allocator, value);
-            return Arc(*root.Mutex(T)).init(allocator, mutex_ptr);
+        pub fn initWithMutex(allocator: Allocator, value: T) !*Arc(*mutex.Mutex(T)) {
+            const mutex_ptr = try mutex.Mutex(T).init(allocator, value);
+            return Arc(*mutex.Mutex(T)).init(allocator, mutex_ptr);
         }
 
         /// Clone the Arc, atomically incrementing the reference count
@@ -576,11 +576,11 @@ test "Arc with Mutex - thread-safe data access" {
     const allocator = testing.allocator;
 
     // Create Arc containing a pointer to the Mutex
-    const arc = try Arc(*root.Mutex(i32)).init(allocator, try root.Mutex(i32).init(allocator, 0));
+    const arc = try Arc(*mutex.Mutex(i32)).init(allocator, try mutex.Mutex(i32).init(allocator, 0));
     defer arc.deinit();
 
     const ThreadContext = struct {
-        arc_ptr: *Arc(*root.Mutex(i32)),
+        arc_ptr: *Arc(*mutex.Mutex(i32)),
         iterations: usize,
     };
 
