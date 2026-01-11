@@ -1,6 +1,6 @@
 const std = @import("std");
 const reflect = @import("zevy_reflect");
-const mutex = @import("../mutex.zig");
+const mutex = @import("../lock/mutex.zig");
 const Allocator = std.mem.Allocator;
 
 /// Atomic reference counted pointer.
@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 /// Not thread-safe for mutation of the contained data; only the reference counting is atomic.
 /// This is purposefully designed this way to give control to the user for how to handle data access
 ///
-/// Use `Arc(*Mutex(T))` or `zevy_mem.initArcWithMutex()` for thread-safe data access.
+/// Use `Arc(T).initWithMutex` for thread-safe data access.
 pub fn Arc(comptime T: type) type {
     return opaque {
         const Self = @This();

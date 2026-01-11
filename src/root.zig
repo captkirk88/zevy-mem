@@ -33,8 +33,17 @@ pub const mmap = @import("platform_mmap.zig");
 
 pub const utils = @import("utils/root.zig");
 
-pub const Mutex = @import("mutex.zig").Mutex;
+/// Synchronization primitives
+pub const lock = struct {
+    pub const RwLock = @import("lock/rwlock.zig").RwLock;
+    pub const Mutex = @import("lock/mutex.zig").Mutex;
+    pub const Pin = @import("lock/pin.zig").Pin;
+    pub const LazyMutex = @import("lock/lazymutex.zig").LazyMutex;
+};
 
+pub const Lazy = @import("lazy.zig").Lazy;
+
+/// Pointer types
 pub const pointers = struct {
     pub const Rc = @import("pointers/rc.zig").Rc;
     pub const Arc = @import("pointers/arc.zig").Arc;
@@ -85,7 +94,7 @@ test "initArcWithMutex - multithreaded mutation" {
     defer arc.deinit();
 
     const ThreadContext = struct {
-        arc_ptr: *pointers.Arc(*Mutex(i32)),
+        arc_ptr: *pointers.Arc(*lock.Mutex(i32)),
         iterations: usize,
     };
 

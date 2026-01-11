@@ -1,7 +1,6 @@
 const std = @import("std");
 const reflect = @import("zevy_reflect");
 const Allocator = std.mem.Allocator;
-const mutex = @import("../mutex.zig");
 
 /// Reference counted pointer (non-atomic, single-threaded).
 pub fn Rc(comptime T: type) type {
@@ -51,12 +50,6 @@ pub fn Rc(comptime T: type) type {
                 .allocator = allocator,
             };
             return @ptrCast(inner);
-        }
-
-        /// Create a new Arc with a mutex-wrapped value for thread-safe access
-        pub fn initWithMutex(allocator: Allocator, value: T) !*Rc(*mutex.Mutex(T)) {
-            const mutex_ptr = try mutex.Mutex(T).init(allocator, value);
-            return Rc(*mutex.Mutex(T)).init(allocator, mutex_ptr);
         }
 
         /// Clone the Rc, incrementing the reference count
