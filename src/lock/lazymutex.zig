@@ -1,3 +1,4 @@
+const Lazy = @import("../lazy.zig").Lazy;
 const std = @import("std");
 const reflect = @import("zevy_reflect");
 const Allocator = std.mem.Allocator;
@@ -8,38 +9,14 @@ const Allocator = std.mem.Allocator;
 /// Note: The lifetime of the LazyMutex is tied to the allocator passed to init().
 /// The LazyMutex and its contained value become invalid when the allocator is no longer valid.
 pub fn LazyMutex(comptime T: type) type {
-    return opaque {
+    return struct {
         const Self = @This();
 
         /// The inner type wrapped by this LazyMutex
         pub const Child = T;
 
-        const Inner = struct {
-            state: enum { uninit, init },
-            value: T,
-            mutex: std.Thread.Mutex,
-            init_fn: *const fn (Allocator) T,
-            allocator: Allocator,
-
-            fn deinit(self: *Inner) void {
-                if (self.state == .init) {
-                    // Call deinit if the type has one
-                    switch (comptime reflect.getReflectInfo(T)) {
-                        .type => |ti| {
-                            if (ti.hasFunc("deinit")) {
-                                self.value.deinit();
-                            }
-                        },
-                        .raw => |ty| {
-                            if (reflect.hasFunc(ty, "deinit")) {
-                                self.value.deinit();
-                            }
-                        },
-                        else => {},
-                    }
-                }
-            }
-        };
+        lazy: Lazy(T),
+        mutex: std.Thread.Mutex,
 
         /// Create a new LazyMutex with an initialization function
         ///
@@ -48,16 +25,11 @@ pub fn LazyMutex(comptime T: type) type {
         ///
         /// Note: The returned LazyMutex's lifetime is tied to the provided allocator.
         /// It becomes invalid when the allocator is deallocated or goes out of scope.
-        pub fn init(allocator: Allocator, init_fn: *const fn (Allocator) T) !*Self {
-            const inner = try allocator.create(Inner);
-            inner.* = .{
-                .state = .uninit,
-                .value = undefined,
+        pub fn init(allocator: std.mem.Allocator, init_fn: *const fn (std.mem.Allocator) T) Self {
+            return .{
+                .lazy = Lazy(T).init(allocator, init_fn),
                 .mutex = .{},
-                .init_fn = init_fn,
-                .allocator = allocator,
             };
-            return @ptrCast(inner);
         }
 
         /// Get the lazily initialized value
@@ -65,49 +37,35 @@ pub fn LazyMutex(comptime T: type) type {
         /// If this is the first access, the initialization function will be called.
         /// Subsequent calls return the cached value directly.
         pub fn get(self: *Self) *T {
-            const inner: *Inner = @ptrCast(@alignCast(self));
-
-            inner.mutex.lock();
-            defer inner.mutex.unlock();
-
-            if (inner.state == .uninit) {
-                inner.value = inner.init_fn(inner.allocator);
-                inner.state = .init;
-            }
-
-            return &inner.value;
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.lazy.get();
         }
 
         /// Get a const pointer to the value (assumes it's initialized)
         ///
         /// Panics if not initialized - use get() first to ensure initialization.
         pub fn getConst(self: *const Self) *const T {
-            const inner: *const Inner = @ptrCast(@alignCast(self));
-            std.debug.assert(inner.state == .init); // Must be initialized first
-            return &inner.value;
+            return self.lazy.getConst();
         }
 
         /// Check if the value has been initialized
         pub fn isInitialized(self: *const Self) bool {
-            const inner: *const Inner = @ptrCast(@alignCast(self));
-            return inner.state == .init;
+            return self.lazy.isInitialized();
         }
 
         /// Force initialization (useful for pre-initializing before concurrent access)
         pub fn initialize(self: *Self) void {
-            _ = self.get(); // This will initialize if needed
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.lazy.initialize();
         }
 
         /// Free the LazyMutex
         ///
         /// This will call deinit on the inner value if it was initialized and has a deinit method.
         pub fn deinit(self: *Self) void {
-            const inner: *Inner = @ptrCast(@alignCast(self));
-
-            inner.deinit();
-
-            const allocator = inner.allocator;
-            allocator.destroy(inner);
+            self.lazy.deinit();
         }
     };
 }
@@ -124,7 +82,7 @@ test "LazyMutex basic lazy initialization" {
         }
     }.init;
 
-    const lazy = try LazyMutex(i32).init(allocator, init_fn);
+    var lazy = LazyMutex(i32).init(allocator, init_fn);
     defer lazy.deinit();
 
     // Not initialized yet
@@ -153,7 +111,7 @@ test "LazyMutex thread safety" {
         }
     }.init;
 
-    const lazy = try LazyMutex(i32).init(allocator, init_fn);
+    var lazy = LazyMutex(i32).init(allocator, init_fn);
     defer lazy.deinit();
 
     const ThreadContext = struct {
@@ -179,7 +137,7 @@ test "LazyMutex thread safety" {
     var i: usize = 0;
     while (i < thread_count) : (i += 1) {
         threads[i] = try std.Thread.spawn(.{}, worker, .{ThreadContext{
-            .lazy_ptr = lazy,
+            .lazy_ptr = &lazy,
             .results_ptr = &results,
             .mutex_ptr = &results_mutex,
         }});
@@ -213,7 +171,7 @@ test "LazyMutex with struct" {
         }
     }.init;
 
-    const lazy = try LazyMutex(Point).init(allocator, init_fn);
+    var lazy = LazyMutex(Point).init(allocator, init_fn);
     defer lazy.deinit();
 
     const point = lazy.get();
@@ -235,7 +193,7 @@ test "LazyMutex force initialize" {
         }
     }.init;
 
-    const lazy = try LazyMutex(i32).init(allocator, init_fn);
+    var lazy = LazyMutex(i32).init(allocator, init_fn);
     defer lazy.deinit();
 
     try testing.expect(!lazy.isInitialized());

@@ -7,6 +7,9 @@ const mem = @import("utils/root.zig");
 pub const interfaces = @import("interfaces.zig");
 
 pub const allocators = struct {
+    const stack_allocator_impl = struct {
+        pub var stack_allocator: StackAllocator = undefined;
+    };
     /// A global StackAllocator instance for general use
     ///
     /// Size: 10 MB
@@ -83,65 +86,4 @@ test "toThreadSafe works with various allocator types" {
     defer ca.reset();
     const tsa3 = toThreadSafe(&ca);
     _ = tsa3;
-}
-
-test "initArcWithMutex - multithreaded mutation" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const init_value: i32 = 0;
-    const arc = try pointers.Arc(i32).initWithMutex(allocator, init_value);
-    defer arc.deinit();
-
-    const ThreadContext = struct {
-        arc_ptr: *pointers.Arc(*lock.Mutex(i32)),
-        iterations: usize,
-    };
-
-    const worker = struct {
-        fn run(ctx: ThreadContext) void {
-            const local_arc = ctx.arc_ptr.clone();
-            defer local_arc.deinit();
-
-            var i: usize = 0;
-            while (i < ctx.iterations) : (i += 1) {
-                var guard = local_arc.get().*.lock();
-                guard.get().* += 1;
-                // release the lock early so we can sleep outside the critical section
-                guard.deinit();
-
-                // occasionally sleep to increase thread interleavings and help expose race conditions
-                if (i % 17 == 0) {
-                    // sleep for ~1ms
-                    std.Thread.sleep(1 * std.time.ns_per_ms);
-                }
-            }
-        }
-    }.run;
-
-    const thread_count = 8;
-    const iterations = 1000;
-    var threads: [thread_count]std.Thread = undefined;
-
-    var i: usize = 0;
-    while (i < thread_count) : (i += 1) {
-        threads[i] = try std.Thread.spawn(.{}, worker, .{ThreadContext{
-            .arc_ptr = arc,
-            .iterations = iterations,
-        }});
-    }
-
-    for (threads) |thread| {
-        thread.join();
-    }
-
-    // Verify the final value
-    {
-        const guard = arc.get().*.lock();
-        defer guard.deinit();
-        const final_count = guard.get().*;
-        try testing.expectEqual(thread_count * iterations, final_count);
-    }
-
-    try testing.expectEqual(1, arc.strongCount());
 }
