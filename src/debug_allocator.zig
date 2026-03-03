@@ -32,7 +32,7 @@ pub const DebugAllocator = struct {
 
         pub fn format(
             self: AllocationInfo,
-            writer: *std.io.Writer,
+            writer: *std.Io.Writer,
         ) !void {
             try writer.print(
                 "#{d} [0x{x}]: {d} bytes (align: {d}) @ 0x{x}, resizes: {d}",

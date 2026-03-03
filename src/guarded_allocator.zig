@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const winbase = if (builtin.os.tag == .windows) @cImport(@cInclude("windows.h")) else struct {};
 
 const Allocator = std.mem.Allocator;
 
@@ -156,13 +157,13 @@ fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usiz
 
 fn allocateGuardedRegion(total_size: usize, guard_size: usize, middle_len: usize) ?[*]u8 {
     if (builtin.os.tag == .windows) {
-        const ptr = std.os.windows.VirtualAlloc(null, total_size, std.os.windows.MEM_RESERVE | std.os.windows.MEM_COMMIT, std.os.windows.PAGE_NOACCESS) catch return null;
+        const ptr = winbase.VirtualAlloc(null, total_size, winbase.MEM_RESERVE | winbase.MEM_COMMIT, winbase.PAGE_NOACCESS) orelse return null;
         const base = @as([*]u8, @ptrCast(ptr));
         var old_protect: u32 = undefined;
-        std.os.windows.VirtualProtect(@ptrCast(base + guard_size), middle_len, std.os.windows.PAGE_READWRITE, &old_protect) catch {
-            std.os.windows.VirtualFree(ptr, 0, std.os.windows.MEM_RELEASE);
+        if (winbase.VirtualProtect(@ptrCast(base + guard_size), middle_len, winbase.PAGE_READWRITE, &old_protect) == 0) {
+            _ = winbase.VirtualFree(ptr, 0, winbase.MEM_RELEASE);
             return null;
-        };
+        }
         return @ptrCast(ptr);
     } else {
         const ptr = std.os.linux.mmap(null, total_size, std.os.linux.PROT.NONE, .{ .ANONYMOUS = true }, -1, 0) catch return null;
@@ -176,7 +177,7 @@ fn allocateGuardedRegion(total_size: usize, guard_size: usize, middle_len: usize
 
 fn freeGuardedRegion(ptr: [*]u8, size: usize) void {
     if (builtin.os.tag == .windows) {
-        std.os.windows.VirtualFree(ptr, 0, std.os.windows.MEM_RELEASE);
+        _ = winbase.VirtualFree(ptr, 0, winbase.MEM_RELEASE);
     } else {
         const rc = std.os.linux.munmap(ptr, size);
         _ = rc; // munmap returns usize, 0 on success
@@ -262,7 +263,7 @@ fn fillBuf(buf: *[]u8) void {
 
 test "GuardedAllocator vs arena_allocator (contiguous)" {
     // With ArenaAllocator backed by fixed buffer, allocations are contiguous, overflow can corrupt adjacent allocations without segfault
-    var large_buf: [10000]u8 = undefined;
+    var large_buf: [30000]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&large_buf);
     var versus = std.heap.ArenaAllocator.init(fba.allocator());
     defer versus.deinit();

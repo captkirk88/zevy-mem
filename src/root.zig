@@ -52,38 +52,6 @@ pub const pointers = struct {
     pub const Arc = @import("pointers/arc.zig").Arc;
 };
 
-pub fn toThreadSafe(allocator: anytype) std.mem.Allocator {
-    const allocator_type = @TypeOf(allocator);
-    if (allocator_type == std.mem.Allocator) {
-        var thread_safe_allocator = std.heap.ThreadSafeAllocator{ .child_allocator = allocator };
-        return thread_safe_allocator.allocator();
-    } else {
-        if (reflect.hasFuncWithArgs(allocator_type, "allocator", &[_]type{})) {
-            const child_alloc = @constCast(allocator).allocator();
-            var thread_safe_allocator = std.heap.ThreadSafeAllocator{ .child_allocator = child_alloc };
-            return thread_safe_allocator.allocator();
-        }
-    }
-    @compileError("Unsupported allocator type: " ++ @typeName(allocator_type));
-}
-
 test {
-    std.testing.refAllDeclsRecursive(@This());
-}
-
-test "toThreadSafe works with various allocator types" {
-    var sa = allocators.StackAllocator.init(1024);
-    defer sa.reset();
-    const tsa1 = toThreadSafe(&sa);
-    _ = tsa1;
-
-    var da = allocators.DebugAllocator.init(std.heap.page_allocator);
-    defer da.deinit();
-    const tsa2 = toThreadSafe(&da);
-    _ = tsa2;
-
-    var ca = allocators.CountingAllocator.init(std.heap.page_allocator);
-    defer ca.reset();
-    const tsa3 = toThreadSafe(&ca);
-    _ = tsa3;
+    std.testing.refAllDecls(@This());
 }

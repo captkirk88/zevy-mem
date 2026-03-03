@@ -29,7 +29,8 @@ pub const MappedRegion = struct {
 pub fn openFile(path: [:0]const u8, create_if_missing: bool) !FileHandle {
     if (builtin.os.tag == .windows) {
         // Try to open existing file first; only create if it doesn't exist
-        const file = std.fs.cwd().openFileZ(path, .{ .mode = .read_write }) catch |err| {
+        const cwd = std.Io.Dir.cwd();
+        const file = cwd.openFile(path, .{ .mode = .read_write }) catch |err| {
             if (err == error.FileNotFound and create_if_missing) {
                 // File doesn't exist and we should create it
                 const created_file = try std.fs.cwd().createFileZ(path, .{ .truncate = true, .read = true });
@@ -50,7 +51,7 @@ pub fn openFile(path: [:0]const u8, create_if_missing: bool) !FileHandle {
 /// Close a file handle.
 pub fn closeFile(handle: FileHandle) void {
     if (builtin.os.tag == .windows) {
-        w.CloseHandle(handle);
+        _ = winbase.CloseHandle(handle);
     } else {
         std.posix.close(handle);
     }
@@ -59,8 +60,9 @@ pub fn closeFile(handle: FileHandle) void {
 /// Get file statistics (size, etc).
 pub fn fileStats(handle: FileHandle) !struct { size: u64 } {
     if (builtin.os.tag == .windows) {
-        const size = try w.GetFileSizeEx(handle);
-        return .{ .size = size };
+        var size: winbase.LARGE_INTEGER = undefined;
+        if (winbase.GetFileSizeEx(handle, &size) == 0) return error.FileNotFound;
+        return .{ .size = @intCast(size.QuadPart) };
     }
     var stat: std.posix.Stat = undefined;
     try std.posix.fstat(handle, &stat);
@@ -70,23 +72,9 @@ pub fn fileStats(handle: FileHandle) !struct { size: u64 } {
 /// Resize file to a specific size.
 pub fn truncateFile(handle: FileHandle, size: u64) !void {
     if (builtin.os.tag == .windows) {
-        const ntdll = w.ntdll;
-
-        try w.SetFilePointerEx_BEGIN(handle, size);
-
-        // Use NtSetInformationFile to set end of file
-        var io_status_block: w.IO_STATUS_BLOCK = undefined;
-        var eof_info: w.FILE_END_OF_FILE_INFORMATION = undefined;
-        eof_info.EndOfFile = @intCast(size);
-
-        const status = ntdll.NtSetInformationFile(
-            handle,
-            &io_status_block,
-            &eof_info,
-            @sizeOf(w.FILE_END_OF_FILE_INFORMATION),
-            .FileEndOfFileInformation,
-        );
-        if (status != .SUCCESS) return error.SetEndOfFileFailed;
+        const new_pos: winbase.LARGE_INTEGER = .{ .QuadPart = @intCast(size) };
+        if (winbase.SetFilePointerEx(handle, new_pos, null, winbase.FILE_BEGIN) == 0) return error.SetEndOfFileFailed;
+        if (winbase.SetEndOfFile(handle) == 0) return error.SetEndOfFileFailed;
     } else {
         try std.posix.ftruncate(handle, size);
     }
@@ -95,7 +83,7 @@ pub fn truncateFile(handle: FileHandle, size: u64) !void {
 /// Sync file to disk.
 pub fn syncFile(handle: FileHandle) void {
     if (builtin.os.tag == .windows) {
-        _ = w.kernel32.FlushFileBuffers(handle);
+        _ = winbase.FlushFileBuffers(handle);
     } else {
         _ = std.posix.fsync(handle) catch {};
     }
@@ -114,7 +102,7 @@ pub fn mapFile(handle: FileHandle, size: usize) !MappedRegion {
         const map_handle = winbase.CreateFileMappingA(
             handle,
             null,
-            w.PAGE_READWRITE,
+            winbase.PAGE_READWRITE,
             size_high,
             size_low,
             null,

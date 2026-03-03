@@ -4,62 +4,61 @@ const Allocator = std.mem.Allocator;
 
 /// Internal read-write lock state (writers-preference to avoid starvation)
 const RwLockState = struct {
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: std.Io.Mutex = .init,
     readers: usize = 0,
     writers_waiting: usize = 0,
     writing: bool = false,
 
     pub fn lockRead(self: *RwLockState) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLock(&self.mutex);
         while (self.writing or self.writers_waiting > 0) {
-            self.cond.wait(&self.mutex);
+            std.Io.Threaded.mutexUnlock(&self.mutex);
+            std.Thread.yield() catch {};
+            std.Io.Threaded.mutexLock(&self.mutex);
         }
         self.readers += 1;
+        std.Io.Threaded.mutexUnlock(&self.mutex);
     }
 
     pub fn tryLockRead(self: *RwLockState) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLock(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
         if (self.writing or self.writers_waiting > 0) return false;
         self.readers += 1;
         return true;
     }
 
     pub fn unlockRead(self: *RwLockState) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLock(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
         self.readers -= 1;
-        if (self.readers == 0) {
-            self.cond.signal();
-        }
     }
 
     pub fn lockWrite(self: *RwLockState) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLock(&self.mutex);
         self.writers_waiting += 1;
         while (self.readers > 0 or self.writing) {
-            self.cond.wait(&self.mutex);
+            std.Io.Threaded.mutexUnlock(&self.mutex);
+            std.Thread.yield() catch {};
+            std.Io.Threaded.mutexLock(&self.mutex);
         }
         self.writers_waiting -= 1;
         self.writing = true;
+        std.Io.Threaded.mutexUnlock(&self.mutex);
     }
 
     pub fn tryLockWrite(self: *RwLockState) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLock(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
         if (self.readers > 0 or self.writing) return false;
         self.writing = true;
         return true;
     }
 
     pub fn unlockWrite(self: *RwLockState) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        std.Io.Threaded.mutexLock(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
         self.writing = false;
-        self.cond.broadcast();
     }
 };
 
@@ -137,7 +136,7 @@ pub fn RwLock(comptime T: type) type {
             const inner = try allocator.create(Inner);
             inner.* = .{
                 .value = value,
-                .rwlock = .{},
+                .rwlock = .{ .mutex = .init },
                 .allocator = allocator,
             };
             return @ptrCast(inner);
@@ -210,7 +209,7 @@ test "RwLock concurrent readers" {
         lock_ptr: *RwLock(i32),
         concurrent_ptr: *usize,
         max_concurrent_ptr: *usize,
-        cnt_mutex_ptr: *std.Thread.Mutex,
+        cnt_mutex_ptr: *std.Io.Mutex,
     };
 
     const reader = struct {
@@ -226,7 +225,7 @@ test "RwLock concurrent readers" {
             ctx.cnt_mutex_ptr.unlock();
 
             // hold the read lock for a short while to increase chance of overlap
-            std.Thread.sleep(5 * std.time.ns_per_ms);
+            std.posix.nanosleep(0, 5 * std.time.ns_per_ms);
 
             _ = g.get().*; // read
             g.deinit();
@@ -239,7 +238,7 @@ test "RwLock concurrent readers" {
 
     var concurrent: usize = 0;
     var max_concurrent: usize = 0;
-    var cnt_mutex: std.Thread.Mutex = .{};
+    var cnt_mutex: std.Io.Mutex = .init;
 
     const thread_count = 8;
     var threads: [thread_count]std.Thread = undefined;
@@ -270,11 +269,11 @@ test "RwLock writer progress with busy readers" {
     defer lock.deinit();
 
     var stop_flag: bool = false;
-    var stop_mutex: std.Thread.Mutex = .{};
+    var stop_mutex: std.Io.Mutex = .init;
     var write_count: usize = 0;
 
     const reader = struct {
-        fn run(lock_ptr: *RwLock(i32), stop_ptr: *bool, stop_mutex_ptr: *std.Thread.Mutex) void {
+        fn run(lock_ptr: *RwLock(i32), stop_ptr: *bool, stop_mutex_ptr: *std.Io.Mutex) void {
             while (true) {
                 stop_mutex_ptr.lock();
                 const s = stop_ptr.*;
@@ -282,7 +281,7 @@ test "RwLock writer progress with busy readers" {
                 if (s) break;
 
                 var g = lock_ptr.lockRead();
-                std.Thread.sleep(2 * std.time.ns_per_ms);
+                std.posix.nanosleep(0, 2 * std.time.ns_per_ms);
                 _ = g.get().*;
                 g.deinit();
                 std.Thread.yield() catch {};
@@ -297,7 +296,7 @@ test "RwLock writer progress with busy readers" {
                 g.get().* += 1;
                 g.deinit();
                 write_count_ptr.* += 1;
-                std.Thread.sleep(1 * std.time.ns_per_ms);
+                std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
             }
         }
     }.run;

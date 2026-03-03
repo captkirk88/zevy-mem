@@ -16,7 +16,7 @@ pub fn LazyMutex(comptime T: type) type {
         pub const Child = T;
 
         lazy: Lazy(T),
-        mutex: std.Thread.Mutex,
+        mutex: std.Io.Mutex,
 
         /// Create a new LazyMutex with an initialization function
         ///
@@ -28,7 +28,7 @@ pub fn LazyMutex(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator, init_fn: *const fn (std.mem.Allocator) T) Self {
             return .{
                 .lazy = Lazy(T).init(allocator, init_fn),
-                .mutex = .{},
+                .mutex = .init,
             };
         }
 
@@ -37,8 +37,8 @@ pub fn LazyMutex(comptime T: type) type {
         /// If this is the first access, the initialization function will be called.
         /// Subsequent calls return the cached value directly.
         pub fn get(self: *Self) *T {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            std.Io.Threaded.mutexLock(&self.mutex);
+            defer std.Io.Threaded.mutexUnlock(&self.mutex);
             return self.lazy.get();
         }
 
@@ -56,8 +56,8 @@ pub fn LazyMutex(comptime T: type) type {
 
         /// Force initialization (useful for pre-initializing before concurrent access)
         pub fn initialize(self: *Self) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            std.Io.Threaded.mutexLock(&self.mutex);
+            defer std.Io.Threaded.mutexUnlock(&self.mutex);
             self.lazy.initialize();
         }
 
@@ -106,7 +106,7 @@ test "LazyMutex thread safety" {
         fn init(alloc: Allocator) i32 {
             _ = alloc;
             // Simulate expensive initialization
-            std.Thread.sleep(10 * std.time.ns_per_ms);
+            std.posix.nanosleep(0, 10 * std.time.ns_per_ms);
             return 100;
         }
     }.init;
@@ -117,20 +117,20 @@ test "LazyMutex thread safety" {
     const ThreadContext = struct {
         lazy_ptr: *LazyMutex(i32),
         results_ptr: *usize,
-        mutex_ptr: *std.Thread.Mutex,
+        mutex_ptr: *std.Io.Mutex,
     };
 
     const worker = struct {
         fn run(ctx: ThreadContext) void {
             const value = ctx.lazy_ptr.get();
-            ctx.mutex_ptr.lock();
+            std.Io.Threaded.mutexLock(ctx.mutex_ptr);
             ctx.results_ptr.* += @intCast(value.*);
-            ctx.mutex_ptr.unlock();
+            std.Io.Threaded.mutexUnlock(ctx.mutex_ptr);
         }
     }.run;
 
     var results: usize = 0;
-    var results_mutex: std.Thread.Mutex = .{};
+    var results_mutex: std.Io.Mutex = .init;
     const thread_count = 4;
     var threads: [thread_count]std.Thread = undefined;
 
@@ -206,3 +206,4 @@ test "LazyMutex force initialize" {
     const value = lazy.get();
     try testing.expectEqual(123, value.*);
 }
+

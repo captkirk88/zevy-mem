@@ -39,8 +39,7 @@ pub const SafeAllocator = struct {
         defer self.allocations.deinit();
         if (self.allocations.count() > 0) {
             var buf: [4096]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
+            var writer = std.Io.Writer.fixed(&buf);
             writer.print("SafeAllocator: Memory leaks detected! {d} unfreed allocations:\n", .{self.allocations.count()}) catch {};
             var it = self.allocations.iterator();
             while (it.next()) |entry| {
@@ -48,7 +47,7 @@ pub const SafeAllocator = struct {
                 const source = utils.resolveSourceLocation(self.inner, entry.key_ptr.*) catch continue;
                 writer.print("{s}\n\n", .{source}) catch {};
             }
-            const message = fbs.getWritten();
+            const message = writer.buffered();
             if (self.panic_on_leak) {
                 std.debug.panic("{s}", .{message});
             } else {

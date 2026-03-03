@@ -1,7 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const winbase = if (builtin.os.tag == .windows) @cImport(@cInclude("windows.h")) else struct {};
+const c = if (builtin.os.tag != .windows) @cImport(@cInclude("unistd.h")) else struct {};
 const platform = @import("platform_mmap.zig");
 const memory_utils = @import("utils/mem.zig");
+
+fn deleteFileZ(path: [:0]const u8) void {
+    if (builtin.os.tag == .windows) {
+        _ = winbase.DeleteFileA(path);
+    } else {
+        _ = c.unlink(path);
+    }
+}
 
 const header_magic = 0x4d4d4150; // "MMAP"
 const header_version: u32 = 1;
@@ -440,7 +450,7 @@ fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usiz
 test "MmapAllocator can allocate and free" {
     const test_allocator = std.testing.allocator;
     const path: [:0]const u8 = "mmap_allocator_test.bin";
-    defer std.fs.cwd().deleteFileZ(path) catch {};
+    defer deleteFileZ(path);
 
     var mmap_alloc = MmapAllocator.init(.{ .path = path, .size = 64 * 1024 });
     defer mmap_alloc.deinit();
@@ -482,7 +492,7 @@ test "InitOptions helpers align and dupe" {
 test "MmapAllocator alignment and resize behavior" {
     const page = platform.page_size;
     const path: [:0]const u8 = "mmap_allocator_align.bin";
-    defer std.fs.cwd().deleteFileZ(path) catch {};
+    defer deleteFileZ(path);
 
     var mmap_alloc = MmapAllocator.init(.withPages(path, 4));
     defer mmap_alloc.deinit();
@@ -510,7 +520,7 @@ test "MmapAllocator alignment and resize behavior" {
 
 test "MmapAllocator reuses freed space" {
     const path: [:0]const u8 = "mmap_allocator_reuse.bin";
-    defer std.fs.cwd().deleteFileZ(path) catch {};
+    defer deleteFileZ(path);
 
     var mmap_alloc = MmapAllocator.init(.withPages(path, 4));
     defer mmap_alloc.deinit();
@@ -529,7 +539,7 @@ test "MmapAllocator reuses freed space" {
 
 test "MmapAllocator preserve keeps data" {
     const path: [:0]const u8 = "mmap_allocator_preserve.bin";
-    defer std.fs.cwd().deleteFileZ(path) catch {};
+    defer deleteFileZ(path);
 
     var first_opts = MmapAllocator.InitOptions.withPages(path, 4);
     first_opts.preserve = false;
@@ -558,7 +568,7 @@ test "MmapAllocator preserve keeps data" {
 
 test "MmapAllocator remap grows and copies data" {
     const path: [:0]const u8 = "mmap_allocator_remap_grow.bin";
-    defer std.fs.cwd().deleteFileZ(path) catch {};
+    defer deleteFileZ(path);
 
     var mmap_alloc = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 8));
     defer mmap_alloc.deinit();
@@ -576,7 +586,7 @@ test "MmapAllocator remap grows and copies data" {
 
 test "MmapAllocator remap to zero frees allocation" {
     const path: [:0]const u8 = "mmap_allocator_remap_zero.bin";
-    defer std.fs.cwd().deleteFileZ(path) catch {};
+    defer deleteFileZ(path);
 
     var mmap_alloc = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 4));
     defer mmap_alloc.deinit();
@@ -634,7 +644,7 @@ test "MmapAllocator multi-write preserve file" {
 
 test "MmapAllocator runtime-vs-page allocator usage" {
     const path: [:0]const u8 = "mmap_allocator_runtime_vs_mmap.bin";
-    defer std.fs.cwd().deleteFileZ(path) catch {};
+    defer deleteFileZ(path);
 
     const runtime_size = platform.page_size * 4;
 

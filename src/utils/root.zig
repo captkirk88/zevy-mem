@@ -237,7 +237,7 @@ pub const MemoryRegion = struct {
     /// Std formatter support
     pub fn format(
         self: MemoryRegion,
-        writer: *std.io.Writer,
+        writer: *std.Io.Writer,
     ) !void {
         try writer.print("0x{x}..0x{x} ({f})", .{
             self.start,
@@ -297,7 +297,7 @@ pub const ByteSize = struct {
     /// Format the byte size into human-readable form using std.fmt
     pub fn format(
         self: ByteSize,
-        writer: *std.io.Writer,
+        writer: *std.Io.Writer,
     ) !void {
         // If you ever come across a Petabyte of data in Zig, please let me know :)
         if (self.bytes >= PB) {
@@ -330,19 +330,17 @@ pub fn byteSize(bytes: usize) ByteSize {
 /// Returns the formatted string, or a fallback if debug info is unavailable.
 /// Caller owns the returned memory.
 pub fn formatSymbolAddress(allocator: std.mem.Allocator, debug_info: *std.debug.SelfInfo, address: usize) ![]const u8 {
-    const module = debug_info.getModuleForAddress(address) catch {
-        return std.fmt.allocPrint(allocator, "0x{x} (no module)", .{address});
-    };
-
-    const symbol = module.getSymbolAtAddress(debug_info.allocator, address) catch {
+    const io = std.Options.debug_io;
+    const symbol = debug_info.getSymbol(io, address) catch {
         return std.fmt.allocPrint(allocator, "0x{x} (no symbol)", .{address});
     };
+    // defer if (symbol.source_location) |loc| allocator.free(loc.file_name);
 
+    const symbol_name = symbol.name orelse "???";
     if (symbol.source_location) |loc| {
-        const file_name = loc.file_name;
-        return std.fmt.allocPrint(allocator, "{s}:{d}:{d} in {s}", .{ file_name, loc.line, loc.column, symbol.name });
+        return std.fmt.allocPrint(allocator, "{s}:{d}:{d} in {s}", .{ loc.file_name, loc.line, loc.column, symbol_name });
     }
-    return std.fmt.allocPrint(allocator, "{s} (0x{x})", .{ symbol.name, address });
+    return std.fmt.allocPrint(allocator, "{s} (0x{x})", .{ symbol_name, address });
 }
 
 /// Resolve a return address to a human-readable source location string.

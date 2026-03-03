@@ -12,7 +12,7 @@ pub fn Mutex(comptime T: type) type {
 
         const Inner = struct {
             value: T,
-            mutex: std.Thread.Mutex,
+            mutex: std.Io.Mutex,
             allocator: Allocator,
 
             fn deinit(self: *Inner) void {
@@ -42,7 +42,7 @@ pub fn Mutex(comptime T: type) type {
             ///
             /// Must be called when done with the protected value
             pub fn deinit(self: Guard) void {
-                self.inner.mutex.unlock();
+                std.Io.Threaded.mutexUnlock(&self.inner.mutex);
             }
 
             /// Get the protected value
@@ -62,7 +62,7 @@ pub fn Mutex(comptime T: type) type {
             const inner = try allocator.create(Inner);
             inner.* = .{
                 .value = value,
-                .mutex = .{},
+                .mutex = .init,
                 .allocator = allocator,
             };
             return @ptrCast(inner);
@@ -71,7 +71,7 @@ pub fn Mutex(comptime T: type) type {
         /// Lock and get a guard for scoped access
         pub fn lock(self: *Self) Guard {
             const inner: *Inner = @ptrCast(@alignCast(self));
-            inner.mutex.lock();
+            std.Io.Threaded.mutexLock(&inner.mutex);
             return Guard{
                 .inner = inner,
                 .value_ptr = &inner.value,
@@ -84,7 +84,7 @@ pub fn Mutex(comptime T: type) type {
         /// But, keep in mind, that if `tryLock` returns null, you did not get the lock and should not access the protected value.
         pub fn tryLock(self: *Self) ?Guard {
             const inner: *Inner = @ptrCast(@alignCast(self));
-            if (inner.mutex.tryLock()) {
+            if (std.Io.Threaded.mutexTryLock(&inner.mutex)) {
                 return Guard{
                     .inner = inner,
                     .value_ptr = &inner.value,
@@ -232,3 +232,4 @@ test "Mutex deinit calls inner deinit" {
 
     try testing.expect(flag.*);
 }
+
