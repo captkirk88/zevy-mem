@@ -59,15 +59,16 @@ pub fn Arc(comptime T: type) type {
             return @ptrCast(inner);
         }
 
-        /// Create a new Arc with a mutex-wrapped value for thread-safe access
-        pub fn initWithMutex(allocator: Allocator, value: T) !*Arc(*Mutex(T)) {
-            const mutex_ptr = try Mutex(T).init(allocator, value);
-            return Arc(*Mutex(T)).init(allocator, mutex_ptr);
+        /// Create a new ArcMutex wrapping the given value.
+        /// Prefer `ArcMutex(T).init` directly; this is a convenience alias.
+        pub fn initWithMutex(allocator: Allocator, value: T) !*ArcMutex(T) {
+            return ArcMutex(T).init(allocator, value);
         }
 
-        pub fn initWithRwLock(allocator: Allocator, value: T) !*Arc(*RwLock(T)) {
-            const rwlock_ptr = try RwLock(T).init(allocator, value);
-            return Arc(*RwLock(T)).init(allocator, rwlock_ptr);
+        /// Create a new ArcRwLock wrapping the given value.
+        /// Prefer `ArcRwLock(T).init` directly; this is a convenience alias.
+        pub fn initWithRwLock(allocator: Allocator, value: T) !*ArcRwLock(T) {
+            return ArcRwLock(T).init(allocator, value);
         }
 
         /// Clone the Arc, atomically incrementing the reference count
@@ -113,6 +114,167 @@ pub fn Arc(comptime T: type) type {
                 .allocator = allocator,
             };
             return @ptrCast(inner);
+        }
+    };
+}
+
+/// Atomic reference-counted handle wrapping a `Mutex`-protected value.
+/// Prefer this over `Arc(*Mutex(T))` — call `lock()`/`tryLock()` directly to access the value.
+///
+/// Example:
+/// ```zig
+/// const ref = try ArcMutex(i32).init(allocator, 42);
+/// defer ref.deinit();
+/// var guard = ref.lock();
+/// defer guard.deinit();
+/// guard.get().* += 1;
+/// ```
+pub fn ArcMutex(comptime T: type) type {
+    return opaque {
+        const Self = @This();
+
+        /// The value type protected by this ArcMutex.
+        pub const Child = T;
+
+        const Inner = struct {
+            value: *Mutex(T),
+            ref_count: std.atomic.Value(usize),
+            allocator: Allocator,
+        };
+
+        /// Create a new ArcMutex with the given initial value.
+        pub fn init(allocator: Allocator, value: T) !*Self {
+            const mutex_ptr = try Mutex(T).init(allocator, value);
+            const inner = try allocator.create(Inner);
+            inner.* = .{
+                .value = mutex_ptr,
+                .ref_count = std.atomic.Value(usize).init(1),
+                .allocator = allocator,
+            };
+            return @ptrCast(inner);
+        }
+
+        /// Atomically increment the reference count and return a second handle.
+        pub fn clone(self: *Self) *Self {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            _ = inner.ref_count.fetchAdd(1, .monotonic);
+            return self;
+        }
+
+        /// Lock the mutex, returning a scoped guard.
+        /// Call `guard.get()` to access the value; call `guard.deinit()` to release the lock.
+        pub fn lock(self: *Self) Mutex(T).Guard {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.value.lock();
+        }
+
+        /// Try to lock without blocking. Returns `null` if already locked.
+        pub fn tryLock(self: *Self) ?Mutex(T).Guard {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.value.tryLock();
+        }
+
+        /// Return the current reference count.
+        pub fn strongCount(self: *Self) usize {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.ref_count.load(.monotonic);
+        }
+
+        /// Decrement the reference count; free all resources when it reaches zero.
+        pub fn deinit(self: *Self) void {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            const old_count = inner.ref_count.fetchSub(1, .release);
+            if (old_count == 1) {
+                _ = inner.ref_count.load(.acquire);
+                inner.value.deinit();
+                inner.allocator.destroy(inner);
+            }
+        }
+    };
+}
+
+/// Atomic reference-counted handle wrapping an `RwLock`-protected value.
+/// Prefer this over `Arc(*RwLock(T))` — call `lockRead()`/`lockWrite()` directly to access the value.
+///
+/// Example:
+/// ```zig
+/// const ref = try ArcRwLock(u32).init(allocator, 0);
+/// defer ref.deinit();
+/// var rg = ref.lockRead();
+/// defer rg.deinit();
+/// std.debug.print("{}", .{rg.get().*});
+/// ```
+pub fn ArcRwLock(comptime T: type) type {
+    return opaque {
+        const Self = @This();
+
+        /// The value type protected by this ArcRwLock.
+        pub const Child = T;
+
+        const Inner = struct {
+            value: *RwLock(T),
+            ref_count: std.atomic.Value(usize),
+            allocator: Allocator,
+        };
+
+        /// Create a new ArcRwLock with the given initial value.
+        pub fn init(allocator: Allocator, value: T) !*Self {
+            const rwlock_ptr = try RwLock(T).init(allocator, value);
+            const inner = try allocator.create(Inner);
+            inner.* = .{
+                .value = rwlock_ptr,
+                .ref_count = std.atomic.Value(usize).init(1),
+                .allocator = allocator,
+            };
+            return @ptrCast(inner);
+        }
+
+        /// Atomically increment the reference count and return a second handle.
+        pub fn clone(self: *Self) *Self {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            _ = inner.ref_count.fetchAdd(1, .monotonic);
+            return self;
+        }
+
+        /// Acquire a shared read lock. Multiple readers may hold simultaneously.
+        pub fn lockRead(self: *Self) RwLock(T).ReadGuard {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.value.lockRead();
+        }
+
+        /// Try to acquire a shared read lock without blocking.
+        pub fn tryLockRead(self: *Self) ?RwLock(T).ReadGuard {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.value.tryLockRead();
+        }
+
+        /// Acquire an exclusive write lock.
+        pub fn lockWrite(self: *Self) RwLock(T).WriteGuard {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.value.lockWrite();
+        }
+
+        /// Try to acquire an exclusive write lock without blocking.
+        pub fn tryLockWrite(self: *Self) ?RwLock(T).WriteGuard {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.value.tryLockWrite();
+        }
+
+        /// Return the current reference count.
+        pub fn strongCount(self: *Self) usize {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            return inner.ref_count.load(.monotonic);
+        }
+
+        /// Decrement the reference count; free all resources when it reaches zero.
+        pub fn deinit(self: *Self) void {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            const old_count = inner.ref_count.fetchSub(1, .release);
+            if (old_count == 1) {
+                _ = inner.ref_count.load(.acquire);
+                inner.value.deinit();
+                inner.allocator.destroy(inner);
+            }
         }
     };
 }
@@ -582,11 +744,11 @@ test "Arc with Mutex - thread-safe data access" {
     const allocator = testing.allocator;
 
     // Create Arc containing a pointer to the Mutex
-    const arc = try Arc(i32).initWithMutex(allocator, 0);
+    const arc = try ArcMutex(i32).init(allocator, 0);
     defer arc.deinit();
 
     const ThreadContext = struct {
-        arc_ptr: *Arc(*Mutex(i32)),
+        arc_ptr: *ArcMutex(i32),
         iterations: usize,
     };
 
@@ -597,8 +759,7 @@ test "Arc with Mutex - thread-safe data access" {
 
             var i: usize = 0;
             while (i < ctx.iterations) : (i += 1) {
-                // Lock the mutex, increment the value, unlock
-                const guard = local_arc.get().*.lock();
+                var guard = local_arc.lock();
                 defer guard.deinit();
                 guard.get().* += 1;
             }
@@ -623,7 +784,7 @@ test "Arc with Mutex - thread-safe data access" {
 
     // Check the final value - should be exactly correct due to mutex protection
     {
-        const guard = arc.get().*.lock();
+        var guard = arc.lock();
         defer guard.deinit();
         const final_count = guard.get().*;
         try testing.expectEqual(thread_count * iterations, final_count);
@@ -635,12 +796,12 @@ test "Arc initWithMutex" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const arc = try Arc(i32).initWithMutex(allocator, 42);
+    const arc = try ArcMutex(i32).init(allocator, 42);
     defer arc.deinit();
 
     // Access the value through the mutex
     {
-        const guard = arc.get().*.lock();
+        var guard = arc.lock();
         defer guard.deinit();
         try testing.expectEqual(42, guard.get().*);
 
@@ -650,7 +811,7 @@ test "Arc initWithMutex" {
 
     // Check the modified value
     {
-        const guard = arc.get().*.lock();
+        var guard = arc.lock();
         defer guard.deinit();
         try testing.expectEqual(100, guard.get().*);
     }

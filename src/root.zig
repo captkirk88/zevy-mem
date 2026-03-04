@@ -50,6 +50,8 @@ pub const Lazy = @import("lazy.zig").Lazy;
 pub const pointers = struct {
     pub const Rc = @import("pointers/rc.zig").Rc;
     pub const Arc = @import("pointers/arc.zig").Arc;
+    pub const ArcMutex = @import("pointers/arc.zig").ArcMutex;
+    pub const ArcRwLock = @import("pointers/arc.zig").ArcRwLock;
 };
 
 test {

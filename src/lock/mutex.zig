@@ -16,16 +16,21 @@ pub fn Mutex(comptime T: type) type {
             allocator: Allocator,
 
             fn deinit(self: *Inner) void {
+                const log = std.log.scoped(.zevy_mem);
                 // Call deinit if the type has one
                 switch (comptime reflect.getReflectInfo(T)) {
                     .type => |ti| {
-                        if (ti.hasFunc("deinit")) {
+                        if (comptime ti.hasFunc("deinit")) {
                             self.value.deinit();
+                        } else if (comptime reflect.hasDeinit(ti.type)) {
+                            log.warn("type has deinit function but can't invoke: {s}", .{ti.name});
                         }
                     },
                     .raw => |ty| {
-                        if (reflect.hasFunc(ty, "deinit")) {
+                        if (comptime reflect.hasFunc(ty, "deinit")) {
                             self.value.deinit();
+                        } else if (comptime reflect.hasDeinit(ty)) {
+                            log.warn("type has deinit function but can't invoke: {s}", .{@typeName(ty)});
                         }
                     },
                     else => {},
@@ -84,7 +89,7 @@ pub fn Mutex(comptime T: type) type {
         /// But, keep in mind, that if `tryLock` returns null, you did not get the lock and should not access the protected value.
         pub fn tryLock(self: *Self) ?Guard {
             const inner: *Inner = @ptrCast(@alignCast(self));
-            if (std.Io.Threaded.mutexTryLock(&inner.mutex)) {
+            if (inner.mutex.tryLock()) {
                 return Guard{
                     .inner = inner,
                     .value_ptr = &inner.value,
@@ -232,4 +237,3 @@ test "Mutex deinit calls inner deinit" {
 
     try testing.expect(flag.*);
 }
-
