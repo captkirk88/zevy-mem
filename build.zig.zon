@@ -1,17 +1,19 @@
 .{
     .name = .zevy_mem,
 
-    .version = "0.0.1",
+    .version = "1.0.0",
     .fingerprint = 0x506d9891d14baf8c, // Changing this has security and trust implications.
 
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0-dev.2694+74f361a5c",
 
     .dependencies = .{
-        .zevy_reflect = .{
-            .path = "../zevy-reflect",
-        },
         .zevy_buildtools = .{
-            .path = "../zevy-buildtools",
+            .url = "git+https://github.com/captkirk88/zevy-buildtools#88cd52945acc7cd70d916fb185c0b6e7864b8fac",
+            .hash = "zevy_buildtools-1.0.0-AG3r_F6RAAD0Bqyn4nImjfm0JKQoL0F4f7OJAyZ8bO5d",
+        },
+        .zevy_reflect = .{
+            .url = "git+https://github.com/captkirk88/zevy-reflect#29825d1728912bb356b7829f26be43868b59e808",
+            .hash = "zevy_reflect-1.0.0-Ob80cEGWAgDKzDYGcHxoMuerPiVCKLVF9kiLGrBLDEUR",
         },
     },
 
