@@ -1,16 +1,28 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const winbase = if (builtin.os.tag == .windows) @cImport(@cInclude("windows.h")) else struct {};
-const c = if (builtin.os.tag != .windows) @cImport(@cInclude("unistd.h")) else struct {};
-const platform = @import("platform_mmap.zig");
 const memory_utils = @import("utils/mem.zig");
 
-fn deleteFileZ(path: [:0]const u8) void {
-    if (builtin.os.tag == .windows) {
-        _ = winbase.DeleteFileA(path);
-    } else {
-        _ = c.unlink(path);
-    }
+var default_threaded: std.Io.Threaded = std.Io.Threaded.init_single_threaded;
+const default_io: std.Io = std.Io.Threaded.io(&default_threaded);
+
+fn deleteFileZ(io: std.Io, path: [:0]const u8) void {
+    // Ignore errors; this helper is only used by tests for cleanup.
+    const dir = std.Io.Dir.cwd();
+    _ = dir.deleteFile(io, path) catch {};
+}
+
+fn openOrCreateFile(io: std.Io, path: [:0]const u8) !std.Io.File {
+    const dir = std.Io.Dir.cwd();
+    const open_flags: std.Io.File.OpenFlags = .{ .mode = .read_write, .allow_directory = false };
+
+    const file = dir.openFile(io, path, open_flags) catch |err| switch (err) {
+        error.FileNotFound => dir.createFile(io, path, .{ .read = true, .truncate = false }) catch |create_err| switch (create_err) {
+            error.PathAlreadyExists => dir.openFile(io, path, open_flags),
+            err => return err,
+        },
+        else => return err,
+    };
+
+    return file;
 }
 
 const header_magic = 0x4d4d4150; // "MMAP"
@@ -51,12 +63,12 @@ pub const FileInspection = struct {
 };
 
 /// Allocator that serves memory out of a memory-mapped file.
-/// Only the mapping slice, mapping handle, file handle, and a few pointers live in RAM;
-/// all allocation metadata is persisted inside the mapped region.
+/// Only the mapping slice and a few pointers live in RAM; all allocation
+/// metadata is persisted inside the mapped region.
 pub const MmapAllocator = struct {
+    file: std.Io.File,
+    mm: std.Io.File.MemoryMap,
     map: []u8,
-    fd: platform.FileHandle, // On Windows: section handle; On POSIX: file descriptor
-    file_handle: platform.FileHandle, // On Windows: file handle; On POSIX: unused
     header: *FileHeader,
     bitset: []u8,
 
@@ -72,7 +84,7 @@ pub const MmapAllocator = struct {
 
         /// Return size rounded up to the system minimum page size.
         pub fn alignSize(size: usize) usize {
-            return platform.alignSize(size);
+            return std.mem.alignForward(usize, size, std.heap.pageSize());
         }
 
         /// Construct InitOptions with size already aligned to the system minimum page size.
@@ -82,7 +94,7 @@ pub const MmapAllocator = struct {
 
         /// Construct InitOptions by specifying the number of pages to reserve.
         pub fn withPages(path: [:0]const u8, pages: usize) InitOptions {
-            const page_size = platform.page_size;
+            const page_size = std.heap.pageSize();
             return .{ .path = path, .size = pages * page_size };
         }
 
@@ -94,16 +106,16 @@ pub const MmapAllocator = struct {
     };
 
     pub fn init(options: InitOptions) MmapAllocator {
-        const page_size = platform.page_size;
+        const page_size = std.heap.pageSize();
         const requested_size = std.mem.alignForward(usize, options.size, page_size);
-        if (requested_size < page_size * 2) std.debug.panic("File too small for MmapAllocator: requested {d}, minimum {d}", .{ requested_size, page_size * 2 });
+        if (requested_size < page_size * 2)
+            std.debug.panic("File too small for MmapAllocator: requested {d}, minimum {d}", .{ requested_size, page_size * 2 });
 
-        const handle = platform.openFile(options.path, true) catch std.debug.panic("Failed to open file: {s}", .{options.path});
-        var cleanup_close_handle = true;
-        errdefer if (cleanup_close_handle) platform.closeFile(handle);
+        const file = openOrCreateFile(options.path) catch std.debug.panic("Failed to open file: {s}", .{options.path});
+        var cleanup_close = true;
+        errdefer if (cleanup_close) std.Io.File.close(file, default_io);
 
-        const file_stat = platform.fileStats(handle) catch std.debug.panic("Failed to get file stats: {s}", .{options.path});
-        const existing_size = file_stat.size;
+        const existing_size = std.Io.File.length(file, default_io) catch std.debug.panic("Failed to get file stats: {s}", .{options.path});
 
         var mapped_size = requested_size;
         if (options.preserve and existing_size > 0) {
@@ -112,19 +124,21 @@ pub const MmapAllocator = struct {
         }
 
         if (!options.preserve or existing_size < mapped_size) {
-            platform.truncateFile(handle, mapped_size) catch std.debug.panic("Failed to truncate file: {s} to size {d}", .{ options.path, mapped_size });
+            std.Io.File.setLength(file, default_io, @intCast(mapped_size)) catch std.debug.panic("Failed to set length of file: {s}", .{options.path});
         }
 
-        const mapped = platform.mapFile(handle, mapped_size) catch std.debug.panic("Failed to map file: {s}", .{options.path});
+        var mm = try std.Io.File.MemoryMap.create(default_io, file, .{
+            .len = mapped_size,
+            .protection = .{ .read = true, .write = true },
+            .populate = true,
+        });
         var cleanup_unmap = true;
-        errdefer if (cleanup_unmap) platform.unmapFile(mapped);
-
-        const file_handle = handle; // Keep the file handle open for syncing and cleanup
+        errdefer if (cleanup_unmap) std.Io.File.MemoryMap.destroy(&mm, default_io);
 
         var self = MmapAllocator{
-            .map = mapped.ptr[0..mapped.len],
-            .fd = mapped.handle, // On Windows: mapping handle; On POSIX: file descriptor
-            .file_handle = file_handle, // File descriptor/handle for syncing
+            .file = file,
+            .mm = mm,
+            .map = @as([]u8, mm.memory),
             .header = undefined,
             .bitset = &[_]u8{},
         };
@@ -133,26 +147,17 @@ pub const MmapAllocator = struct {
             self.initializeLayout(page_size) catch std.debug.panic("Failed to initialize layout: {s}", .{options.path});
         }
 
-        platform.syncFile(self.file_handle);
+        _ = std.Io.File.sync(file, default_io) catch {};
 
         cleanup_unmap = false;
-        cleanup_close_handle = false;
+        cleanup_close = false;
         return self;
     }
 
     pub fn deinit(self: *MmapAllocator) void {
-        platform.syncFile(self.file_handle);
-
-        const region = platform.MappedRegion{
-            .ptr = self.map.ptr,
-            .len = self.map.len,
-            .handle = self.fd,
-            .file_handle = self.file_handle,
-        };
-        platform.unmapFile(region);
-
-        const close_handle = if (builtin.os.tag == .windows) self.file_handle else self.fd;
-        platform.closeFile(close_handle);
+        _ = std.Io.File.MemoryMap.write(&self.mm, default_io) catch {};
+        std.Io.File.MemoryMap.destroy(&self.mm, default_io);
+        std.Io.File.close(self.file, default_io);
     }
 
     pub fn allocator(self: *MmapAllocator) std.mem.Allocator {
@@ -300,16 +305,23 @@ pub const MmapAllocator = struct {
 };
 
 /// Inspect a memory-mapped allocator file
-pub fn inspectFile(inspect_allocator: std.mem.Allocator, path: [:0]const u8) !FileInspection {
-    const page_size = platform.page_size;
-    const handle = try platform.openFile(path, false);
-    defer platform.closeFile(handle);
+pub fn inspectFile(io: std.Io, inspect_allocator: std.mem.Allocator, path: [:0]const u8) !FileInspection {
+    const page_size = std.heap.pageSize();
+    const handle = try openOrCreateFile(io, path);
+    defer handle.close(io);
 
-    const file_stat = try platform.fileStats(handle);
+    const file_stat = try std.Io.File.stat(handle, io);
     const file_size = file_stat.size;
 
-    const mapped = try platform.mapFile(handle, file_size);
-    defer platform.unmapFile(mapped);
+    const mapped = try std.Io.File.MemoryMap.create(io, handle, .{
+        .len = file_size,
+        .protection = .{ .read = true },
+        .populate = true,
+    });
+    defer {
+        mapped.write(io) catch {};
+        mapped.destroy(io);
+    }
 
     const file_header = @as(*const FileHeader, @ptrCast(@alignCast(mapped.ptr)));
     if (file_header.magic != header_magic or file_header.version != header_version) {
@@ -479,7 +491,7 @@ test "MmapAllocator can allocate and free" {
 }
 
 test "InitOptions helpers align and dupe" {
-    const page = platform.page_size;
+    const page = std.heap.pageSize();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -490,7 +502,7 @@ test "InitOptions helpers align and dupe" {
 }
 
 test "MmapAllocator alignment and resize behavior" {
-    const page = platform.page_size;
+    const page = std.heap.pageSize();
     const path: [:0]const u8 = "mmap_allocator_align.bin";
     defer deleteFileZ(path);
 
@@ -646,7 +658,7 @@ test "MmapAllocator runtime-vs-page allocator usage" {
     const path: [:0]const u8 = "mmap_allocator_runtime_vs_mmap.bin";
     defer deleteFileZ(path);
 
-    const runtime_size = platform.page_size * 4;
+    const runtime_size = std.heap.pageSize() * 4;
 
     const before_runtime = try memory_utils.getMemoryInfo();
     const runtime_chunk = try std.heap.page_allocator.alloc(u8, runtime_size);

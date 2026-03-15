@@ -27,25 +27,6 @@ pub fn Lazy(comptime T: type) type {
                 value: T,
                 init_fn: *const fn (std.mem.Allocator) T,
                 allocator: std.mem.Allocator,
-
-                fn deinit(self: *InnerStruct) void {
-                    if (self.state == .init) {
-                        // Call deinit if the type has one
-                        switch (comptime reflect.getReflectInfo(T)) {
-                            .type => |ti| {
-                                if (ti.hasFunc("deinit")) {
-                                    self.value.deinit();
-                                }
-                            },
-                            .raw => |ty| {
-                                if (reflect.hasFunc(ty, "deinit")) {
-                                    self.value.deinit();
-                                }
-                            },
-                            else => {},
-                        }
-                    }
-                }
             };
         };
 
@@ -112,7 +93,7 @@ pub fn Lazy(comptime T: type) type {
 
         /// Force initialization (useful for pre-initializing)
         pub fn initialize(self: *Self) void {
-            _ = self.get(); // This will initialize if needed
+            std.mem.doNotOptimizeAway(self.get()); // This will initialize if needed
         }
 
         /// Free the Lazy
@@ -121,7 +102,9 @@ pub fn Lazy(comptime T: type) type {
         pub fn deinit(self: *Self) void {
             if (self.inner) |inner| {
                 const inner_struct: *Inner.InnerStruct = @ptrCast(@alignCast(inner));
-                inner_struct.deinit();
+
+                @import("lock/mutex.zig").cleanup(T, &inner_struct.value, inner_struct.allocator);
+
                 self.allocator.destroy(@as(*Inner.InnerStruct, @ptrCast(@alignCast(inner))));
             }
         }

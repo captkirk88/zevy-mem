@@ -16,28 +16,8 @@ pub fn Rc(comptime T: type) type {
             allocator: Allocator,
 
             fn deinit(self: *Inner) void {
-                // Call deinit if the type has one
-                switch (comptime reflect.getReflectInfo(T)) {
-                    .type => |ti| {
-                        if (ti.hasFunc("deinit")) {
-                            if (reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
-                                self.value.deinit(self.allocator);
-                            } else {
-                                self.value.deinit();
-                            }
-                        }
-                    },
-                    .raw => |ty| {
-                        if (reflect.hasFunc(ty, "deinit")) {
-                            if (reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
-                                self.value.deinit(self.allocator);
-                            } else {
-                                self.value.deinit();
-                            }
-                        }
-                    },
-                    else => {},
-                }
+                // Only call deinit if the type structurally requires cleanup
+                @import("../lock/mutex.zig").cleanup(T, &self.value, self.allocator);
             }
         };
 

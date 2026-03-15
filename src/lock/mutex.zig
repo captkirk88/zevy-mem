@@ -2,6 +2,21 @@ const std = @import("std");
 const reflect = @import("zevy_reflect");
 const Allocator = std.mem.Allocator;
 
+pub fn cleanup(comptime T: type, target: *T, allocator: Allocator) void {
+    if (comptime reflect.utils.requiresCleanup(T)) {
+        if (comptime @hasDecl(T, "deinit")) {
+            if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
+                target.deinit(allocator);
+            } else if (comptime reflect.hasFunc(T, "deinit")) {
+                target.deinit();
+            } else {
+                const log = std.log.scoped(.zevy_mem);
+                log.warn("type has cleanup but can't invoke: {s}", .{@typeName(T)});
+            }
+        }
+    }
+}
+
 /// Thread-safe mutex-protected pointer.
 pub fn Mutex(comptime T: type) type {
     return opaque {
@@ -14,28 +29,6 @@ pub fn Mutex(comptime T: type) type {
             value: T,
             mutex: std.Io.Mutex,
             allocator: Allocator,
-
-            fn deinit(self: *Inner) void {
-                const log = std.log.scoped(.zevy_mem);
-                // Call deinit if the type has one
-                switch (comptime reflect.getReflectInfo(T)) {
-                    .type => |ti| {
-                        if (comptime ti.hasFunc("deinit")) {
-                            self.value.deinit();
-                        } else if (comptime reflect.hasDeinit(ti.type)) {
-                            log.warn("type has deinit function but can't invoke: {s}", .{ti.name});
-                        }
-                    },
-                    .raw => |ty| {
-                        if (comptime reflect.hasFunc(ty, "deinit")) {
-                            self.value.deinit();
-                        } else if (comptime reflect.hasDeinit(ty)) {
-                            log.warn("type has deinit function but can't invoke: {s}", .{@typeName(ty)});
-                        }
-                    },
-                    else => {},
-                }
-            }
         };
 
         /// Guard for scoped mutex access
@@ -102,7 +95,7 @@ pub fn Mutex(comptime T: type) type {
         pub fn deinit(self: *Self) void {
             const inner: *Inner = @ptrCast(@alignCast(self));
 
-            inner.deinit();
+            cleanup(T, &inner.value, inner.allocator);
 
             const allocator = inner.allocator;
             allocator.destroy(inner);

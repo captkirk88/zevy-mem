@@ -77,19 +77,7 @@ pub fn RwLock(comptime T: type) type {
 
             fn deinit(self: *Inner) void {
                 // Call deinit if the type has one
-                switch (comptime reflect.getReflectInfo(T)) {
-                    .type => |ti| {
-                        if (ti.hasFunc("deinit")) {
-                            self.value.deinit();
-                        }
-                    },
-                    .raw => |ty| {
-                        if (reflect.hasFunc(ty, "deinit")) {
-                            self.value.deinit();
-                        }
-                    },
-                    else => {},
-                }
+                @import("mutex.zig").cleanup(T, &self.value);
             }
         };
 
