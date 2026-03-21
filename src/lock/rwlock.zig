@@ -77,7 +77,7 @@ pub fn RwLock(comptime T: type) type {
 
             fn deinit(self: *Inner) void {
                 // Call deinit if the type has one
-                @import("mutex.zig").cleanup(T, &self.value);
+                @import("mutex.zig").cleanup(T, &self.value, self.allocator);
             }
         };
 
