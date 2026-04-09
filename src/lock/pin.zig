@@ -6,6 +6,8 @@ const Allocator = std.mem.Allocator;
 /// This is useful for self-referential structures or data that must maintain a stable address.
 /// Unlike Rust, Zig doesn't have built-in move semantics, but Pin provides a safety mechanism
 /// to ensure values aren't accidentally relocated while pointers to them exist.
+///
+/// **NOTE**: UNFINISHED
 pub fn Pin(comptime T: type) type {
     return opaque {
         const Self = @This();

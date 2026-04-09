@@ -32,7 +32,6 @@ pub const allocators = struct {
     pub const MmapAllocator = @import("mmap_allocator.zig").MmapAllocator;
     pub const TypeFilterAllocator = @import("type_filter_allocator.zig").TypeFilterAllocator;
 };
-pub const mmap = @import("platform_mmap.zig");
 
 pub const utils = @import("utils/root.zig");
 
@@ -56,4 +55,5 @@ pub const pointers = struct {
 
 test {
     std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(@import("mmap_allocator.zig"));
 }

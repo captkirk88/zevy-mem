@@ -37,8 +37,18 @@ fn getMemoryInfoLinux() !MemoryInfo {
 }
 
 fn getMemoryInfoWindows() !MemoryInfo {
-    const process = std.os.windows.GetCurrentProcess();
-    const mem_counters = try std.os.windows.GetProcessMemoryInfo(process);
+    const windows = std.os.windows;
+    var mem_counters: windows.PROCESS.VM_COUNTERS = undefined;
+    switch (windows.ntdll.NtQueryInformationProcess(
+        windows.current_process,
+        .VmCounters,
+        &mem_counters,
+        @sizeOf(windows.PROCESS.VM_COUNTERS),
+        null,
+    )) {
+        .SUCCESS => {},
+        else => return error.Unexpected,
+    }
     const current_usage = mem_counters.WorkingSetSize;
 
     // Windows doesn't have a simple address space limit like Unix.

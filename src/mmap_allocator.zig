@@ -1,9 +1,6 @@
 const std = @import("std");
 const memory_utils = @import("utils/mem.zig");
 
-var default_threaded: std.Io.Threaded = std.Io.Threaded.init_single_threaded;
-const default_io: std.Io = std.Io.Threaded.io(&default_threaded);
-
 fn deleteFileZ(io: std.Io, path: [:0]const u8) void {
     // Ignore errors; this helper is only used by tests for cleanup.
     const dir = std.Io.Dir.cwd();
@@ -17,7 +14,7 @@ fn openOrCreateFile(io: std.Io, path: [:0]const u8) !std.Io.File {
     const file = dir.openFile(io, path, open_flags) catch |err| switch (err) {
         error.FileNotFound => dir.createFile(io, path, .{ .read = true, .truncate = false }) catch |create_err| switch (create_err) {
             error.PathAlreadyExists => dir.openFile(io, path, open_flags),
-            err => return err,
+            else => |other_err| return other_err,
         },
         else => return err,
     };
@@ -66,6 +63,7 @@ pub const FileInspection = struct {
 /// Only the mapping slice and a few pointers live in RAM; all allocation
 /// metadata is persisted inside the mapped region.
 pub const MmapAllocator = struct {
+    io: std.Io,
     file: std.Io.File,
     mm: std.Io.File.MemoryMap,
     map: []u8,
@@ -105,17 +103,17 @@ pub const MmapAllocator = struct {
         }
     };
 
-    pub fn init(options: InitOptions) MmapAllocator {
+    pub fn init(io: std.Io, options: InitOptions) MmapAllocator {
         const page_size = std.heap.pageSize();
         const requested_size = std.mem.alignForward(usize, options.size, page_size);
         if (requested_size < page_size * 2)
             std.debug.panic("File too small for MmapAllocator: requested {d}, minimum {d}", .{ requested_size, page_size * 2 });
 
-        const file = openOrCreateFile(options.path) catch std.debug.panic("Failed to open file: {s}", .{options.path});
+        const file = openOrCreateFile(io, options.path) catch std.debug.panic("Failed to open file: {s}", .{options.path});
         var cleanup_close = true;
-        errdefer if (cleanup_close) std.Io.File.close(file, default_io);
+        errdefer if (cleanup_close) std.Io.File.close(file, io);
 
-        const existing_size = std.Io.File.length(file, default_io) catch std.debug.panic("Failed to get file stats: {s}", .{options.path});
+        const existing_size = std.Io.File.length(file, io) catch std.debug.panic("Failed to get file stats: {s}", .{options.path});
 
         var mapped_size = requested_size;
         if (options.preserve and existing_size > 0) {
@@ -124,18 +122,19 @@ pub const MmapAllocator = struct {
         }
 
         if (!options.preserve or existing_size < mapped_size) {
-            std.Io.File.setLength(file, default_io, @intCast(mapped_size)) catch std.debug.panic("Failed to set length of file: {s}", .{options.path});
+            std.Io.File.setLength(file, io, @intCast(mapped_size)) catch std.debug.panic("Failed to set length of file: {s}", .{options.path});
         }
 
-        var mm = try std.Io.File.MemoryMap.create(default_io, file, .{
+        var mm = std.Io.File.MemoryMap.create(io, file, .{
             .len = mapped_size,
             .protection = .{ .read = true, .write = true },
             .populate = true,
-        });
+        }) catch std.debug.panic("Failed to memory-map file: {s}", .{options.path});
         var cleanup_unmap = true;
-        errdefer if (cleanup_unmap) std.Io.File.MemoryMap.destroy(&mm, default_io);
+        errdefer if (cleanup_unmap) std.Io.File.MemoryMap.destroy(&mm, io);
 
         var self = MmapAllocator{
+            .io = io,
             .file = file,
             .mm = mm,
             .map = @as([]u8, mm.memory),
@@ -147,7 +146,7 @@ pub const MmapAllocator = struct {
             self.initializeLayout(page_size) catch std.debug.panic("Failed to initialize layout: {s}", .{options.path});
         }
 
-        _ = std.Io.File.sync(file, default_io) catch {};
+        _ = std.Io.File.sync(file, io) catch {};
 
         cleanup_unmap = false;
         cleanup_close = false;
@@ -155,9 +154,9 @@ pub const MmapAllocator = struct {
     }
 
     pub fn deinit(self: *MmapAllocator) void {
-        _ = std.Io.File.MemoryMap.write(&self.mm, default_io) catch {};
-        std.Io.File.MemoryMap.destroy(&self.mm, default_io);
-        std.Io.File.close(self.file, default_io);
+        _ = std.Io.File.MemoryMap.write(&self.mm, self.io) catch {};
+        std.Io.File.MemoryMap.destroy(&self.mm, self.io);
+        std.Io.File.close(self.file, self.io);
     }
 
     pub fn allocator(self: *MmapAllocator) std.mem.Allocator {
@@ -313,17 +312,14 @@ pub fn inspectFile(io: std.Io, inspect_allocator: std.mem.Allocator, path: [:0]c
     const file_stat = try std.Io.File.stat(handle, io);
     const file_size = file_stat.size;
 
-    const mapped = try std.Io.File.MemoryMap.create(io, handle, .{
+    var mapped = try std.Io.File.MemoryMap.create(io, handle, .{
         .len = file_size,
         .protection = .{ .read = true },
         .populate = true,
     });
-    defer {
-        mapped.write(io) catch {};
-        mapped.destroy(io);
-    }
+    defer mapped.destroy(io);
 
-    const file_header = @as(*const FileHeader, @ptrCast(@alignCast(mapped.ptr)));
+    const file_header = @as(*const FileHeader, @ptrCast(@alignCast(mapped.memory.ptr)));
     if (file_header.magic != header_magic or file_header.version != header_version) {
         return error.InvalidFile;
     }
@@ -337,10 +333,10 @@ pub fn inspectFile(io: std.Io, inspect_allocator: std.mem.Allocator, path: [:0]c
         const bit_idx: u3 = @intCast(page % 8);
         const mask: u8 = @as(u8, 1) << bit_idx;
         const bitset_start = @sizeOf(FileHeader);
-        const is_used = if (bitset_start + byte_idx < mapped.len) (mapped.ptr[bitset_start + byte_idx] & mask) != 0 else false;
+        const is_used = if (bitset_start + byte_idx < mapped.memory.len) (mapped.memory[bitset_start + byte_idx] & mask) != 0 else false;
 
         if (is_used) {
-            const block_addr = @intFromPtr(mapped.ptr) + page * page_size;
+            const block_addr = @intFromPtr(mapped.memory.ptr) + page * page_size;
             const alloc_hdr = @as(*const AllocHeader, @ptrCast(@alignCast(@as([*]const u8, @ptrFromInt(block_addr)))));
             alloc_list.appendAssumeCapacity(.{
                 .page_offset = alloc_hdr.page_offset,
@@ -462,9 +458,9 @@ fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usiz
 test "MmapAllocator can allocate and free" {
     const test_allocator = std.testing.allocator;
     const path: [:0]const u8 = "mmap_allocator_test.bin";
-    defer deleteFileZ(path);
+    defer deleteFileZ(std.testing.io, path);
 
-    var mmap_alloc = MmapAllocator.init(.{ .path = path, .size = 64 * 1024 });
+    var mmap_alloc = MmapAllocator.init(std.testing.io, .{ .path = path, .size = 64 * 1024 });
     defer mmap_alloc.deinit();
 
     const allocator = mmap_alloc.allocator();
@@ -504,9 +500,9 @@ test "InitOptions helpers align and dupe" {
 test "MmapAllocator alignment and resize behavior" {
     const page = std.heap.pageSize();
     const path: [:0]const u8 = "mmap_allocator_align.bin";
-    defer deleteFileZ(path);
+    defer deleteFileZ(std.testing.io, path);
 
-    var mmap_alloc = MmapAllocator.init(.withPages(path, 4));
+    var mmap_alloc = MmapAllocator.init(std.testing.io, .withPages(path, 4));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -532,9 +528,9 @@ test "MmapAllocator alignment and resize behavior" {
 
 test "MmapAllocator reuses freed space" {
     const path: [:0]const u8 = "mmap_allocator_reuse.bin";
-    defer deleteFileZ(path);
+    defer deleteFileZ(std.testing.io, path);
 
-    var mmap_alloc = MmapAllocator.init(.withPages(path, 4));
+    var mmap_alloc = MmapAllocator.init(std.testing.io, .withPages(path, 4));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -551,11 +547,11 @@ test "MmapAllocator reuses freed space" {
 
 test "MmapAllocator preserve keeps data" {
     const path: [:0]const u8 = "mmap_allocator_preserve.bin";
-    defer deleteFileZ(path);
+    defer deleteFileZ(std.testing.io, path);
 
     var first_opts = MmapAllocator.InitOptions.withPages(path, 4);
     first_opts.preserve = false;
-    var first = MmapAllocator.init(first_opts);
+    var first = MmapAllocator.init(std.testing.io, first_opts);
     const alloc1 = first.allocator();
 
     const buf = try alloc1.alloc(u8, 32);
@@ -566,23 +562,23 @@ test "MmapAllocator preserve keeps data" {
 
     var second_opts = MmapAllocator.InitOptions.withPages(path, 4);
     second_opts.preserve = true;
-    var second = MmapAllocator.init(second_opts);
+    var second = MmapAllocator.init(std.testing.io, second_opts);
     defer second.deinit();
 
     const restored_ptr = second.ptrFromOffset(rel_off);
     try std.testing.expectEqual(@as(u8, 0xAB), restored_ptr[0]);
 
     // Inspect the file to verify allocations
-    var inspection = try inspectFile(std.testing.allocator, path);
+    var inspection = try inspectFile(std.testing.io, std.testing.allocator, path);
     defer inspection.deinit(std.testing.allocator);
     try std.testing.expect(inspection.allocations.len > 0);
 }
 
 test "MmapAllocator remap grows and copies data" {
     const path: [:0]const u8 = "mmap_allocator_remap_grow.bin";
-    defer deleteFileZ(path);
+    defer deleteFileZ(std.testing.io, path);
 
-    var mmap_alloc = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 8));
+    var mmap_alloc = MmapAllocator.init(std.testing.io, MmapAllocator.InitOptions.withPages(path, 8));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -598,9 +594,9 @@ test "MmapAllocator remap grows and copies data" {
 
 test "MmapAllocator remap to zero frees allocation" {
     const path: [:0]const u8 = "mmap_allocator_remap_zero.bin";
-    defer deleteFileZ(path);
+    defer deleteFileZ(std.testing.io, path);
 
-    var mmap_alloc = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 4));
+    var mmap_alloc = MmapAllocator.init(std.testing.io, MmapAllocator.InitOptions.withPages(path, 4));
     defer mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
@@ -613,8 +609,9 @@ test "MmapAllocator remap to zero frees allocation" {
 
 test "MmapAllocator multi-write preserve file" {
     const path: [:0]const u8 = "mmap_allocator_multi_write.bin";
+    defer deleteFileZ(std.testing.io, path);
 
-    var first = MmapAllocator.init(MmapAllocator.InitOptions.withPages(path, 8));
+    var first = MmapAllocator.init(std.testing.io, MmapAllocator.InitOptions.withPages(path, 8));
     const allocator = first.allocator();
 
     const chunk1 = try allocator.alloc(u8, 64);
@@ -638,7 +635,7 @@ test "MmapAllocator multi-write preserve file" {
 
     var second_opts = MmapAllocator.InitOptions.withPages(path, 8);
     second_opts.preserve = true;
-    var second = MmapAllocator.init(second_opts);
+    var second = MmapAllocator.init(std.testing.io, second_opts);
     defer second.deinit();
 
     const restored1 = second.ptrFromOffset(off1)[0..chunk1.len];
@@ -656,7 +653,7 @@ test "MmapAllocator multi-write preserve file" {
 
 test "MmapAllocator runtime-vs-page allocator usage" {
     const path: [:0]const u8 = "mmap_allocator_runtime_vs_mmap.bin";
-    defer deleteFileZ(path);
+    defer deleteFileZ(std.testing.io, path);
 
     const runtime_size = std.heap.pageSize() * 4;
 
@@ -671,7 +668,7 @@ test "MmapAllocator runtime-vs-page allocator usage" {
     std.heap.page_allocator.free(runtime_chunk);
 
     const before_mmap = try memory_utils.getMemoryInfo();
-    var mmap_alloc = MmapAllocator.init(.{ .path = path, .size = runtime_size });
+    var mmap_alloc = MmapAllocator.init(std.testing.io, .{ .path = path, .size = runtime_size });
     defer mmap_alloc.deinit();
     const mmap_chunk = try mmap_alloc.allocator().alloc(u8, 1);
     mmap_chunk[0] = 0xBB;
