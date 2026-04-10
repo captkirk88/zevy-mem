@@ -106,7 +106,7 @@ test "LazyMutex thread safety" {
         fn init(alloc: Allocator) i32 {
             _ = alloc;
             // Simulate expensive initialization
-            std.posix.nanosleep(0, 10 * std.time.ns_per_ms);
+            _ = std.testing.io.sleep(.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
             return 100;
         }
     }.init;

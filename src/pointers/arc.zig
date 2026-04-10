@@ -70,6 +70,23 @@ pub fn Arc(comptime T: type) type {
             return inner.ref_count.load(.monotonic);
         }
 
+        /// Transfer the contained value into a newly allocated owned pointer.
+        ///
+        /// Fails with `error.NotUnique` if this Arc has more than one strong reference.
+        /// The returned pointer is allocated with the same allocator used to create the Arc.
+        /// The caller becomes responsible for calling `deinit` on the value when needed and
+        /// destroying the returned pointer with that allocator.
+        pub fn toOwned(self: *Self) !*T {
+            const inner: *Inner = @ptrCast(@alignCast(self));
+            if (inner.ref_count.load(.acquire) != 1) return error.NotUnique;
+
+            const allocator = inner.allocator;
+            const owned = try allocator.create(T);
+            owned.* = inner.value;
+            allocator.destroy(inner);
+            return owned;
+        }
+
         /// Atomically decrement reference count and free if it reaches zero
         pub fn deinit(self: *Self) void {
             const inner: *Inner = @ptrCast(@alignCast(self));
@@ -797,4 +814,58 @@ test "Arc initWithMutex" {
     }
 
     try testing.expectEqual(1, arc.strongCount());
+}
+
+test "Arc toOwned transfers unique value" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const arc = try Arc(i32).init(allocator, 42);
+    const owned = arc.toOwned() catch |err| {
+        arc.deinit();
+        return err;
+    };
+    defer allocator.destroy(owned);
+
+    try testing.expectEqual(42, owned.*);
+}
+
+test "Arc toOwned preserves cleanup responsibility" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const TestType = struct {
+        deinit_called: *bool,
+
+        pub fn deinit(self: *@This()) void {
+            self.deinit_called.* = true;
+        }
+    };
+
+    var deinit_called = false;
+    const arc = try Arc(TestType).init(allocator, .{ .deinit_called = &deinit_called });
+    const owned = arc.toOwned() catch |err| {
+        arc.deinit();
+        return err;
+    };
+    defer allocator.destroy(owned);
+
+    try testing.expect(!deinit_called);
+
+    owned.deinit();
+    try testing.expect(deinit_called);
+}
+
+test "Arc toOwned fails when shared" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const arc1 = try Arc(i32).init(allocator, 7);
+    defer arc1.deinit();
+
+    const arc2 = arc1.clone();
+    defer arc2.deinit();
+
+    try testing.expectError(error.NotUnique, arc1.toOwned());
+    try testing.expectEqual(2, arc1.strongCount());
 }

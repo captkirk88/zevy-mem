@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 
 pub fn cleanup(comptime T: type, target: *T, allocator: Allocator) void {
     if (comptime reflect.utils.requiresCleanup(T)) {
-        if (comptime @hasDecl(T, "deinit")) {
+        if (comptime reflect.hasDeinit(T)) {
             if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{Allocator})) {
                 target.deinit(allocator);
             } else if (comptime reflect.hasFunc(T, "deinit")) {

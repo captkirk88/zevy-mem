@@ -205,22 +205,22 @@ test "RwLock concurrent readers" {
             var g = ctx.lock_ptr.lockRead();
 
             // increment concurrent and update max under mutex
-            ctx.cnt_mutex_ptr.lock();
+            ctx.cnt_mutex_ptr.lockUncancelable(std.testing.io);
             ctx.concurrent_ptr.* += 1;
             if (ctx.concurrent_ptr.* > ctx.max_concurrent_ptr.*) {
                 ctx.max_concurrent_ptr.* = ctx.concurrent_ptr.*;
             }
-            ctx.cnt_mutex_ptr.unlock();
+            ctx.cnt_mutex_ptr.unlock(std.testing.io);
 
             // hold the read lock for a short while to increase chance of overlap
-            std.posix.nanosleep(0, 5 * std.time.ns_per_ms);
+            _ = std.testing.io.sleep(.fromNanoseconds(5 * std.time.ns_per_ms), .awake) catch {};
 
             _ = g.get().*; // read
             g.deinit();
 
-            ctx.cnt_mutex_ptr.lock();
+            ctx.cnt_mutex_ptr.lockUncancelable(std.testing.io);
             ctx.concurrent_ptr.* -= 1;
-            ctx.cnt_mutex_ptr.unlock();
+            ctx.cnt_mutex_ptr.unlock(std.testing.io);
         }
     }.run;
 
@@ -263,13 +263,13 @@ test "RwLock writer progress with busy readers" {
     const reader = struct {
         fn run(lock_ptr: *RwLock(i32), stop_ptr: *bool, stop_mutex_ptr: *std.Io.Mutex) void {
             while (true) {
-                stop_mutex_ptr.lock();
+                stop_mutex_ptr.lockUncancelable(std.testing.io);
                 const s = stop_ptr.*;
-                stop_mutex_ptr.unlock();
+                stop_mutex_ptr.unlock(std.testing.io);
                 if (s) break;
 
                 var g = lock_ptr.lockRead();
-                std.posix.nanosleep(0, 2 * std.time.ns_per_ms);
+                _ = std.testing.io.sleep(.fromNanoseconds(2 * std.time.ns_per_ms), .awake) catch {};
                 _ = g.get().*;
                 g.deinit();
                 std.Thread.yield() catch {};
@@ -284,7 +284,7 @@ test "RwLock writer progress with busy readers" {
                 g.get().* += 1;
                 g.deinit();
                 write_count_ptr.* += 1;
-                std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+                _ = std.testing.io.sleep(.fromNanoseconds(1 * std.time.ns_per_ms), .awake) catch {};
             }
         }
     }.run;
@@ -303,9 +303,9 @@ test "RwLock writer progress with busy readers" {
     wthread.join();
 
     // signal readers to stop
-    stop_mutex.lock();
+    stop_mutex.lockUncancelable(std.testing.io);
     stop_flag = true;
-    stop_mutex.unlock();
+    stop_mutex.unlock(std.testing.io);
 
     for (rthreads) |thread| {
         thread.join();

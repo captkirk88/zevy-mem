@@ -55,5 +55,9 @@ pub const pointers = struct {
 
 test {
     std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(allocators);
+    std.testing.refAllDecls(lock);
+    std.testing.refAllDecls(pointers);
+    std.testing.refAllDecls(utils);
     std.testing.refAllDecls(@import("mmap_allocator.zig"));
 }
