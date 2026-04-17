@@ -330,17 +330,30 @@ pub fn byteSize(bytes: usize) ByteSize {
 /// Returns the formatted string, or a fallback if debug info is unavailable.
 /// Caller owns the returned memory.
 pub fn formatSymbolAddress(allocator: std.mem.Allocator, debug_info: *std.debug.SelfInfo, address: usize) ![]const u8 {
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    defer arena_allocator.deinit();
     const io = std.Options.debug_io;
-    const symbol = debug_info.getSymbol(io, address) catch {
+    var symbols = std.ArrayList(std.debug.Symbol).empty;
+    defer symbols.deinit(allocator);
+    debug_info.getSymbols(
+        io,
+        allocator,
+        arena_allocator.allocator(),
+        address,
+        true,
+        &symbols,
+    ) catch {
         return std.fmt.allocPrint(allocator, "0x{x} (no symbol)", .{address});
     };
     // defer if (symbol.source_location) |loc| allocator.free(loc.file_name);
-
-    const symbol_name = symbol.name orelse "???";
-    if (symbol.source_location) |loc| {
-        return std.fmt.allocPrint(allocator, "{s}:{d}:{d} in {s}", .{ loc.file_name, loc.line, loc.column, symbol_name });
+    for (symbols.items) |symbol| {
+        const symbol_name = symbol.name orelse "???";
+        if (symbol.source_location) |loc| {
+            return std.fmt.allocPrint(allocator, "{s}:{d}:{d} in {s}", .{ loc.file_name, loc.line, loc.column, symbol_name });
+        }
+        return std.fmt.allocPrint(allocator, "{s} (0x{x})", .{ symbol_name, address });
     }
-    return std.fmt.allocPrint(allocator, "{s} (0x{x})", .{ symbol_name, address });
+    return std.fmt.allocPrint(allocator, "0x{x} (symbol not found)", .{address});
 }
 
 /// Resolve a return address to a human-readable source location string.

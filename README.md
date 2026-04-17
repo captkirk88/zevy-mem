@@ -6,7 +6,7 @@ A collection of memory allocators and utilities for Zig.
 
 [![][license]](https://github.com/captkirk88/zevy-mem/blob/main/LICENSE)
 
-[![Zig Version](https://img.shields.io/badge/zig-0.15.1+-blue.svg)](https://ziglang.org/)
+[![Zig Version](https://img.shields.io/badge/zig-0.16.0-blue.svg)](https://ziglang.org/)
 
 ## Features
 
