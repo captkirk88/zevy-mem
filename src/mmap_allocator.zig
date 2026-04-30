@@ -69,6 +69,7 @@ pub const MmapAllocator = struct {
     map: []u8,
     header: *FileHeader,
     bitset: []u8,
+    preserve: bool,
 
     pub const InitOptions = struct {
         /// Path to the backing file. Must be zero-terminated to avoid extra allocations.
@@ -140,6 +141,7 @@ pub const MmapAllocator = struct {
             .map = @as([]u8, mm.memory),
             .header = undefined,
             .bitset = &[_]u8{},
+            .preserve = options.preserve,
         };
 
         if (!options.preserve or !self.tryLoadExisting(page_size)) {
@@ -153,10 +155,28 @@ pub const MmapAllocator = struct {
         return self;
     }
 
-    pub fn deinit(self: *MmapAllocator) void {
-        _ = std.Io.File.MemoryMap.write(&self.mm, self.io) catch {};
-        std.Io.File.MemoryMap.destroy(&self.mm, self.io);
-        std.Io.File.close(self.file, self.io);
+    pub const DeinitStatus = enum { ok, leak };
+
+    pub fn deinit(self: *MmapAllocator) DeinitStatus {
+        var status: DeinitStatus = .ok;
+
+        var p: usize = self.header.data_start_page;
+        while (p < self.header.total_pages) : (p += 1) {
+            if (self.pageUsed(p)) {
+                status = .leak;
+                break;
+            }
+        }
+
+        if (!self.preserve) {
+            @memset(self.map, 0);
+        }
+
+        self.mm.write(self.io) catch {};
+        self.mm.destroy(self.io);
+        self.mm.destroy(self.io);
+        self.file.close(self.io);
+        return status;
     }
 
     pub fn allocator(self: *MmapAllocator) std.mem.Allocator {
@@ -461,7 +481,7 @@ test "MmapAllocator can allocate and free" {
     defer deleteFileZ(std.testing.io, path);
 
     var mmap_alloc = MmapAllocator.init(std.testing.io, .{ .path = path, .size = 64 * 1024 });
-    defer mmap_alloc.deinit();
+    defer _ = mmap_alloc.deinit();
 
     const allocator = mmap_alloc.allocator();
 
@@ -503,7 +523,7 @@ test "MmapAllocator alignment and resize behavior" {
     defer deleteFileZ(std.testing.io, path);
 
     var mmap_alloc = MmapAllocator.init(std.testing.io, .withPages(path, 4));
-    defer mmap_alloc.deinit();
+    defer _ = mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
     const Aligned64 = struct { value: u8 align(64) };
@@ -531,7 +551,7 @@ test "MmapAllocator reuses freed space" {
     defer deleteFileZ(std.testing.io, path);
 
     var mmap_alloc = MmapAllocator.init(std.testing.io, .withPages(path, 4));
-    defer mmap_alloc.deinit();
+    defer _ = mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
     const buf1 = try allocator.alloc(u8, 128);
@@ -550,7 +570,7 @@ test "MmapAllocator preserve keeps data" {
     defer deleteFileZ(std.testing.io, path);
 
     var first_opts = MmapAllocator.InitOptions.withPages(path, 4);
-    first_opts.preserve = false;
+    first_opts.preserve = true;
     var first = MmapAllocator.init(std.testing.io, first_opts);
     const alloc1 = first.allocator();
 
@@ -558,12 +578,12 @@ test "MmapAllocator preserve keeps data" {
     buf[0] = 0xAB;
     const rel_off = first.offsetFromPtr(buf);
 
-    first.deinit();
+    _ = first.deinit();
 
     var second_opts = MmapAllocator.InitOptions.withPages(path, 4);
     second_opts.preserve = true;
     var second = MmapAllocator.init(std.testing.io, second_opts);
-    defer second.deinit();
+    defer _ = second.deinit();
 
     const restored_ptr = second.ptrFromOffset(rel_off);
     try std.testing.expectEqual(@as(u8, 0xAB), restored_ptr[0]);
@@ -579,7 +599,7 @@ test "MmapAllocator remap grows and copies data" {
     defer deleteFileZ(std.testing.io, path);
 
     var mmap_alloc = MmapAllocator.init(std.testing.io, MmapAllocator.InitOptions.withPages(path, 8));
-    defer mmap_alloc.deinit();
+    defer _ = mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
     const initial = try allocator.alloc(u8, 32);
@@ -597,7 +617,7 @@ test "MmapAllocator remap to zero frees allocation" {
     defer deleteFileZ(std.testing.io, path);
 
     var mmap_alloc = MmapAllocator.init(std.testing.io, MmapAllocator.InitOptions.withPages(path, 4));
-    defer mmap_alloc.deinit();
+    defer _ = mmap_alloc.deinit();
     const allocator = mmap_alloc.allocator();
 
     const buf = try allocator.alloc(u8, 64);
@@ -611,7 +631,9 @@ test "MmapAllocator multi-write preserve file" {
     const path: [:0]const u8 = "mmap_allocator_multi_write.bin";
     defer deleteFileZ(std.testing.io, path);
 
-    var first = MmapAllocator.init(std.testing.io, MmapAllocator.InitOptions.withPages(path, 8));
+    var first_opts = MmapAllocator.InitOptions.withPages(path, 8);
+    first_opts.preserve = true;
+    var first = MmapAllocator.init(std.testing.io, first_opts);
     const allocator = first.allocator();
 
     const chunk1 = try allocator.alloc(u8, 64);
@@ -631,12 +653,12 @@ test "MmapAllocator multi-write preserve file" {
     const off1 = first.offsetFromPtr(chunk1);
     const off2 = first.offsetFromPtr(chunk2);
 
-    first.deinit();
+    _ = first.deinit();
 
     var second_opts = MmapAllocator.InitOptions.withPages(path, 8);
     second_opts.preserve = true;
     var second = MmapAllocator.init(std.testing.io, second_opts);
-    defer second.deinit();
+    defer _ = second.deinit();
 
     const restored1 = second.ptrFromOffset(off1)[0..chunk1.len];
     const restored2 = second.ptrFromOffset(off2)[0..chunk2.len];
@@ -669,7 +691,7 @@ test "MmapAllocator runtime-vs-page allocator usage" {
 
     const before_mmap = try memory_utils.getMemoryInfo();
     var mmap_alloc = MmapAllocator.init(std.testing.io, .{ .path = path, .size = runtime_size });
-    defer mmap_alloc.deinit();
+    defer _ = mmap_alloc.deinit();
     const mmap_chunk = try mmap_alloc.allocator().alloc(u8, 1);
     mmap_chunk[0] = 0xBB;
     const after_mmap = try memory_utils.getMemoryInfo();
