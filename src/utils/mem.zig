@@ -21,7 +21,7 @@ pub fn getMemoryInfo() !MemoryInfo {
     }
 }
 
-/// TODO working on getting this to work on linux
+/// TODO: working on getting this to work on linux, PR welcome!
 fn getMemoryInfoLinux() !MemoryInfo {
     // Get current usage via getrusage
     var rusage: std.os.linux.rusage = undefined;

@@ -7,9 +7,6 @@ pub fn Rc(comptime T: type) type {
     return opaque {
         const Self = @This();
 
-        /// The inner type wrapped by this Rc
-        pub const Child = T;
-
         const Inner = struct {
             value: T,
             ref_count: usize,
@@ -20,6 +17,12 @@ pub fn Rc(comptime T: type) type {
                 @import("../lock/mutex.zig").cleanup(T, &self.value, self.allocator);
             }
         };
+
+        /// The value type wrapped by this Rc.
+        pub fn Child(self: *Self) type {
+            _ = self;
+            return T;
+        }
 
         /// Create a new Rc with initial value
         pub fn init(allocator: Allocator, value: T) !*Self {

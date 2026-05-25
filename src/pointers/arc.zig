@@ -14,9 +14,6 @@ pub fn Arc(comptime T: type) type {
     return opaque {
         const Self = @This();
 
-        /// The inner type wrapped by this Arc
-        pub const Child = T;
-
         const Inner = struct {
             value: T,
             ref_count: std.atomic.Value(usize),
@@ -27,6 +24,12 @@ pub fn Arc(comptime T: type) type {
                 @import("../lock/mutex.zig").cleanup(T, &self.value, self.allocator);
             }
         };
+
+        /// The value type wrapped by this Arc.
+        pub fn Child(self: *Self) type {
+            _ = self;
+            return T;
+        }
 
         /// Create a new Arc with initial value
         pub fn init(allocator: Allocator, value: T) !*Self {
@@ -130,14 +133,17 @@ pub fn ArcMutex(comptime T: type) type {
     return opaque {
         const Self = @This();
 
-        /// The value type protected by this ArcMutex.
-        pub const Child = T;
-
         const Inner = struct {
             value: *Mutex(T),
             ref_count: std.atomic.Value(usize),
             allocator: Allocator,
         };
+
+        /// The value type wrapped by this ArcMutex.
+        pub fn Child(self: *Self) type {
+            _ = self;
+            return T;
+        }
 
         /// Create a new ArcMutex with the given initial value.
         pub fn init(allocator: Allocator, value: T) !*Self {
@@ -205,14 +211,17 @@ pub fn ArcRwLock(comptime T: type) type {
     return opaque {
         const Self = @This();
 
-        /// The value type protected by this ArcRwLock.
-        pub const Child = T;
-
         const Inner = struct {
             value: *RwLock(T),
             ref_count: std.atomic.Value(usize),
             allocator: Allocator,
         };
+
+        /// The value type wrapped by this ArcRwLock.
+        pub fn Child(self: *Self) type {
+            _ = self;
+            return T;
+        }
 
         /// Create a new ArcRwLock with the given initial value.
         pub fn init(allocator: Allocator, value: T) !*Self {
