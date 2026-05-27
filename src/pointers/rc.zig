@@ -19,10 +19,7 @@ pub fn Rc(comptime T: type) type {
         };
 
         /// The value type wrapped by this Rc.
-        pub fn Child(self: *Self) type {
-            _ = self;
-            return T;
-        }
+        pub const Child = T;
 
         /// Create a new Rc with initial value
         pub fn init(allocator: Allocator, value: T) !*Self {
