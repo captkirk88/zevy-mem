@@ -26,10 +26,7 @@ pub fn Arc(comptime T: type) type {
         };
 
         /// The value type wrapped by this Arc.
-        pub fn Child(self: *Self) type {
-            _ = self;
-            return T;
-        }
+        pub const Child = T;
 
         /// Create a new Arc with initial value
         pub fn init(allocator: Allocator, value: T) !*Self {
@@ -289,7 +286,7 @@ test "Arc basic operations" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const arc = try Arc(i32).init(allocator, 42);
+    var arc = try Arc(i32).init(allocator, 42);
     defer arc.deinit();
 
     const arcType = Arc(i32).Child;
