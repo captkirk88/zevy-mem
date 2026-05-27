@@ -206,4 +206,3 @@ test "LazyMutex force initialize" {
     const value = lazy.get();
     try testing.expectEqual(123, value.*);
 }
-
