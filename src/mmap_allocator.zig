@@ -12,9 +12,17 @@ fn openOrCreateFile(io: std.Io, path: [:0]const u8) !std.Io.File {
     const open_flags: std.Io.File.OpenFlags = .{ .mode = .read_write, .allow_directory = false };
 
     const file = dir.openFile(io, path, open_flags) catch |err| switch (err) {
-        error.FileNotFound => dir.createFile(io, path, .{ .read = true, .truncate = false }) catch |create_err| switch (create_err) {
-            error.PathAlreadyExists => dir.openFile(io, path, open_flags),
-            else => |other_err| return other_err,
+        error.FileNotFound => {
+            const parent_dir = std.fs.path.dirname(path);
+            if (parent_dir) |parent_dir_path| {
+                if (!std.mem.eql(u8, parent_dir_path, ".")) {
+                    try dir.createDirPath(io, parent_dir_path);
+                }
+            }
+            return dir.createFile(io, path, .{ .read = true, .truncate = false }) catch |create_err| switch (create_err) {
+                error.PathAlreadyExists => dir.openFile(io, path, open_flags),
+                else => return create_err,
+            };
         },
         else => return err,
     };
