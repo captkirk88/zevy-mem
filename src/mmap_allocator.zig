@@ -260,6 +260,15 @@ pub const MmapAllocator = struct {
         return null;
     }
 
+    fn freeBytes(self: *MmapAllocator) usize {
+        var free_pages: usize = 0;
+        var page = @as(usize, self.header.data_start_page);
+        while (page < self.header.total_pages) : (page += 1) {
+            if (!self.pageUsed(page)) free_pages += 1;
+        }
+        return free_pages * self.pageSize();
+    }
+
     /// Mark a range of pages as used or free.
     fn markRange(self: *MmapAllocator, start: usize, count: usize, used: bool) void {
         var i: usize = 0;
@@ -390,7 +399,13 @@ fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: us
     const worst_case = header_size + len + (align_bytes - 1);
     const pages_needed = std.math.divCeil(usize, worst_case, self.pageSize()) catch return null;
 
-    const start_page = self.findFreeRun(pages_needed) orelse return null;
+    const start_page = self.findFreeRun(pages_needed) orelse {
+        const available_bytes = self.freeBytes();
+        if (available_bytes < len) {
+            std.debug.panic("MmapAllocator out of memory: requested {d} bytes, available {d} bytes in mapped file: {s}", .{ len, available_bytes, self.map });
+        }
+        return null;
+    };
     self.markRange(start_page, pages_needed, true);
 
     const base_addr = self.baseAddress() + start_page * self.pageSize();
