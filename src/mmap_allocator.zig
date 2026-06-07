@@ -4,7 +4,7 @@ const memory_utils = @import("utils/mem.zig");
 fn deleteFileZ(io: std.Io, path: [:0]const u8) void {
     // Ignore errors; this helper is only used by tests for cleanup.
     const dir = std.Io.Dir.cwd();
-    _ = dir.deleteFile(io, path) catch {};
+    dir.deleteFile(io, path) catch {};
 }
 
 fn openOrCreateFile(io: std.Io, path: [:0]const u8) !std.Io.File {
@@ -148,7 +148,7 @@ pub const MmapAllocator = struct {
             self.initializeLayout(page_size) catch std.debug.panic("Failed to initialize layout: {s}", .{options.path});
         }
 
-        _ = std.Io.File.sync(file, io) catch {};
+        std.Io.File.sync(file, io) catch |err| std.debug.panic("Failed to sync file: {s}, error: {s}", .{ options.path, @errorName(err) });
 
         cleanup_unmap = false;
         cleanup_close = false;
@@ -173,7 +173,6 @@ pub const MmapAllocator = struct {
         }
 
         self.mm.write(self.io) catch {};
-        self.mm.destroy(self.io);
         self.mm.destroy(self.io);
         self.file.close(self.io);
         return status;
