@@ -1,3 +1,6 @@
+> [!NOTE]
+> Archived, see [zevy-ecs](https://www.github.com/captkirk88/zevy-ecs) README for details.
+
 # zevy-mem
 
 A collection of memory allocators and utilities for Zig.
